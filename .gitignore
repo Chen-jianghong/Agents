@@ -7,3 +7,6 @@ dist/
 *.7z
 .e2e-workspace/
 .pi-worker/
+apps/desktop/dist-electron/
+apps/desktop/dist-renderer/
+apps/desktop/release/
