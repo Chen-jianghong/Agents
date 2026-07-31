@@ -10,7 +10,40 @@ import {
   ModelConfigService,
   MultiAgentRestApiServer,
   PiAgentManager,
+  type SecretStore,
 } from "../src/index.js";
+
+function memorySecrets(): SecretStore & { values: Map<string, string> } {
+  const values = new Map<string, string>();
+  return {
+    values,
+    get: async (ref) => values.get(ref),
+    set: async (ref, value) => { values.set(ref, value); },
+    delete: async (ref) => { values.delete(ref); },
+  };
+}
+
+function makeControlPlane(runtime: ReturnType<typeof createMultiAgentRuntime>) {
+  return new AgentControlPlane(runtime.registry, new PiAgentManager({
+    create: async (profile, task) => ({
+      agentId: profile.id,
+      sessionId: "s",
+      profile,
+      session: {} as never,
+      status: "created",
+      prompt: async () => ({
+        agentId: profile.id,
+        agentTaskId: task.id,
+        status: "completed",
+        changedFiles: [],
+        tests: [],
+        risks: [],
+      }),
+      cancel: async () => undefined,
+      subscribe: () => () => undefined,
+    }),
+  }));
+}
 
 describe("Model configuration REST API", () => {
   let root: string;
@@ -217,5 +250,134 @@ describe("Model configuration REST API", () => {
     } finally {
       await bare.stop();
     }
+  });
+
+  it("adds a vendor with an inline API key stored in the SecretStore", async () => {
+    const runtime = createMultiAgentRuntime();
+    const secrets = memorySecrets();
+    const vendorConfig = new ModelConfigService({
+      store: new FileModelConfigStore(join(root, "models-vendor")),
+      secrets,
+      now: () => new Date().toISOString(),
+    });
+    const vendorServer = new MultiAgentRestApiServer(makeControlPlane(runtime), {
+      modelConfig: vendorConfig,
+    });
+    const address = await vendorServer.start();
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/model/vendors`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "DeepSeek API",
+          baseUrl: "https://api.deepseek.com",
+          apiKey: "sk-inline-key",
+          modelName: "deepseek-chat",
+          contextWindow: 65536,
+        }),
+      });
+      assert.equal(response.status, 200);
+      const body = (await response.json()) as {
+        provider: { id: string; name: string; baseUrl: string; apiKeySecretRef: string };
+        modelProfile: { name: string; providerId: string; modelName: string; contextWindow: number };
+      };
+      // Provider id derived from the name; no plaintext key in the record.
+      assert.equal(body.provider.id, "deepseek-api");
+      assert.equal(body.provider.name, "DeepSeek API");
+      assert.equal(body.provider.baseUrl, "https://api.deepseek.com");
+      assert.equal(body.provider.apiKeySecretRef, "DEEPSEEK-API_API_KEY");
+      assert.ok(!JSON.stringify(body.provider).includes("sk-inline-key"), "no plaintext key in provider");
+
+      // The key landed in the SecretStore, not in the config record.
+      assert.equal(secrets.values.get("DEEPSEEK-API_API_KEY"), "sk-inline-key");
+
+      // Default model profile was created for the vendor.
+      assert.equal(body.modelProfile.name, "deepseek-api-default");
+      assert.equal(body.modelProfile.providerId, "deepseek-api");
+      assert.equal(body.modelProfile.modelName, "deepseek-chat");
+      assert.equal(body.modelProfile.contextWindow, 65536);
+    } finally {
+      await vendorServer.stop();
+    }
+  });
+
+  it("adds a vendor without an API key (anonymous/local provider)", async () => {
+    const runtime = createMultiAgentRuntime();
+    const vendorConfig = new ModelConfigService({
+      store: new FileModelConfigStore(join(root, "models-vendor-anon")),
+      now: () => new Date().toISOString(),
+    });
+    const vendorServer = new MultiAgentRestApiServer(makeControlPlane(runtime), {
+      modelConfig: vendorConfig,
+    });
+    const address = await vendorServer.start();
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/model/vendors`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Ollama",
+          baseUrl: "http://127.0.0.1:11434",
+          modelName: "qwen2.5:7b",
+          modelProfileName: "local-coder",
+        }),
+      });
+      assert.equal(response.status, 200);
+      const body = (await response.json()) as {
+        provider: { id: string; apiKeySecretRef?: string };
+        modelProfile: { name: string };
+      };
+      assert.equal(body.provider.id, "ollama");
+      assert.equal(body.provider.apiKeySecretRef, undefined);
+      assert.equal(body.modelProfile.name, "local-coder");
+    } finally {
+      await vendorServer.stop();
+    }
+  });
+
+  it("rejects a vendor with an inline API key when no SecretStore is configured", async () => {
+    const response = await jsonFetch("/api/model/vendors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "NoStore",
+        apiKey: "sk-xxx",
+        modelName: "m",
+      }),
+    });
+    assert.equal(response.status, 422);
+    assert.match((response.body as { error: { message: string } }).error.message, /SecretStore/);
+  });
+
+  it("validates vendor input", async () => {
+    const emptyName = await jsonFetch("/api/model/vendors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "  ", modelName: "m" }),
+    });
+    assert.equal(emptyName.status, 422);
+
+    const badWindow = await jsonFetch("/api/model/vendors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "X", modelName: "m", contextWindow: -5 }),
+    });
+    assert.equal(badWindow.status, 422);
+
+    const badMethod = await jsonFetch("/api/model/vendors", { method: "GET" });
+    assert.equal(badMethod.status, 405);
+  });
+
+  it("serves the vendor registration form at /ui/vendors", async () => {
+    const response = await fetch(`${baseUrl}/ui/vendors`);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /手动添加供应商/);
+    assert.match(html, /name="name"/);
+    assert.match(html, /name="baseUrl"/);
+    assert.match(html, /name="apiKey"/);
+    assert.match(html, /name="modelName"/);
+    assert.match(html, /name="contextWindow"/);
+    assert.match(html, /\/api\/model\/vendors/);
   });
 });

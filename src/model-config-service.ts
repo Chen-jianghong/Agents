@@ -15,6 +15,7 @@ import type { ModelAliases } from "./model-runtime.js";
 import {
   DEFAULT_ROLE_BINDINGS,
   FileModelConfigStore,
+  ModelConfigValidationError,
   validateModelProfileConfig,
   validateProviderConfig,
   validateRoleBinding,
@@ -22,6 +23,7 @@ import {
   type ModelConfigSnapshot,
   type ModelProfileConfig,
   type ProviderConfig,
+  type ProviderKind,
 } from "./model-config.js";
 
 /** Host-owned secret vault. Plaintext keys only cross this interface. */
@@ -37,6 +39,30 @@ export type ModelProfileInput = Omit<
   ModelProfileConfig,
   "id" | "version" | "createdAt" | "updatedAt"
 >;
+
+/** One-form vendor registration (provider + default model profile). */
+export interface VendorInput {
+  /** Vendor display name; provider id is derived from it. */
+  name: string;
+  /** API base URL (e.g. https://api.deepseek.com). */
+  baseUrl?: string;
+  /** Plaintext key persisted into the host SecretStore. */
+  apiKey?: string;
+  /** Alternative: reference an existing secret by name. */
+  apiKeySecretRef?: string;
+  kind?: ProviderKind;
+  /** Model name exposed by the vendor (e.g. deepseek-chat). */
+  modelName: string;
+  /** Model context window in tokens. */
+  contextWindow?: number;
+  /** Model profile name; defaults to `<providerId>-default`. */
+  modelProfileName?: string;
+}
+
+export interface VendorResult {
+  provider: ProviderConfig;
+  modelProfile: ModelProfileConfig;
+}
 
 export interface ResolvedRoleModel {
   modelProfile: ModelProfileConfig;
@@ -154,6 +180,59 @@ export class ModelConfigService {
     this.modelProfiles.delete(name);
   }
 
+  // ---- Vendor quick-add ----
+
+  /**
+   * One-form vendor registration: a Provider plus its default Model
+   * Profile. The provider id is derived from the vendor name; an inline
+   * `apiKey` is persisted into the host SecretStore (never into the
+   * Provider record), otherwise `apiKeySecretRef` is used as-is.
+   */
+  async addVendor(input: VendorInput): Promise<VendorResult> {
+    const name = input.name.trim();
+    if (!name) {
+      throw new ModelConfigValidationError("Vendor name must not be empty");
+    }
+    const modelName = input.modelName.trim();
+    if (!modelName) {
+      throw new ModelConfigValidationError("Vendor model name must not be empty");
+    }
+    if (input.contextWindow !== undefined
+      && (!Number.isInteger(input.contextWindow) || input.contextWindow < 1)) {
+      throw new ModelConfigValidationError("contextWindow must be a positive integer");
+    }
+    const providerId = slugify(name);
+
+    let apiKeySecretRef = input.apiKeySecretRef;
+    if (input.apiKey) {
+      if (!this.secrets) {
+        throw new ModelConfigValidationError(
+          "apiKey was provided but no SecretStore is configured; use apiKeySecretRef instead",
+        );
+      }
+      apiKeySecretRef = input.apiKeySecretRef ?? `${providerId.toUpperCase()}_API_KEY`;
+      await this.secrets.set(apiKeySecretRef, input.apiKey);
+    }
+
+    const provider = await this.upsertProvider({
+      id: providerId,
+      name,
+      kind: input.kind ?? "openai-compatible",
+      ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
+      ...(apiKeySecretRef ? { apiKeySecretRef } : {}),
+      enabled: true,
+    });
+    const profileName = input.modelProfileName?.trim() || `${providerId}-default`;
+    const modelProfile = await this.upsertModelProfile({
+      name: profileName,
+      providerId,
+      modelName,
+      ...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
+      enabled: true,
+    });
+    return { provider, modelProfile };
+  }
+
   // ---- Role bindings ----
 
   listRoleBindings(): AgentRoleBinding[] {
@@ -253,4 +332,16 @@ export class ModelConfigService {
       }
     }
   }
+}
+
+/** "DeepSeek API" -> "deepseek-api"; keeps provider ids URL-safe. */
+function slugify(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!slug) {
+    throw new ModelConfigValidationError("Vendor name must produce a valid provider id");
+  }
+  return slug;
 }

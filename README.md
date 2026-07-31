@@ -429,6 +429,8 @@ const address = await server.start(); // 默认只绑定 127.0.0.1
 | GET/PUT/DELETE | `/api/model/profiles/:name` | 读取/新增更新/删除 Model Profile（版本号自动递增） |
 | GET | `/api/model/role-bindings` | 列出角色模型绑定 |
 | GET/PUT/DELETE | `/api/model/role-bindings/:role` | 读取/设置/删除角色绑定（新任务立即使用新配置） |
+| POST | `/api/model/vendors` | **一键添加供应商**：`{ name, baseUrl?, apiKey?, apiKeySecretRef?, modelName, contextWindow? }` → 同时创建 Provider + Model Profile；`apiKey` 存入宿主 SecretStore（Provider 记录只留 `apiKeySecretRef`） |
+| GET | `/ui/vendors` | 内置供应商添加表单页（浏览器打开，POST 到 `/api/model/vendors`） |
 
 错误码映射：`invalid_request` 系 → 400，`*_not_found` → 404，`*_mismatch` / `agent_depth_limit` / 模型配置校验失败 → 422，`*_unavailable` → 503，鉴权失败 → 401。
 

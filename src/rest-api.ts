@@ -123,6 +123,10 @@ export class MultiAgentRestApiServer {
         writeJson(response, 200, { status: "ok", controlPlaneVersion: CONTROL_PLANE_VERSION });
         return;
       }
+      if (request.method === "GET" && pathname === "/ui/vendors") {
+        this.serveVendorForm(response);
+        return;
+      }
       if (segments[0] !== "api") {
         throw new RestApiError(404, "Route not found");
       }
@@ -334,6 +338,22 @@ export class MultiAgentRestApiServer {
       case "role-bindings":
         await this.handleRoleBindings(request, response, modelConfig, segments);
         return;
+      case "vendors":
+        if (segments.length === 3) {
+          requireMethod(request, "POST");
+          const body = await readJsonBody(request, this.options.maxBodyBytes);
+          try {
+            const result = await modelConfig.addVendor(body as unknown as Parameters<typeof modelConfig.addVendor>[0]);
+            writeJson(response, 200, result);
+          } catch (error) {
+            if (error instanceof Error && error.name === "ModelConfigValidationError") {
+              throw new RestApiError(422, error.message);
+            }
+            throw error;
+          }
+          return;
+        }
+        throw new RestApiError(404, "Route not found");
       default:
         throw new RestApiError(404, "Route not found");
     }
@@ -471,6 +491,78 @@ export class MultiAgentRestApiServer {
     throw new RestApiError(404, "Route not found");
   }
 
+  /** Simple built-in HTML form for manual vendor registration (/ui/vendors). */
+  private serveVendorForm(response: ServerResponse): void {
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    response.end(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>添加供应商 - Multi-Agent Dev</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; color: #1f2933; }
+  h1 { font-size: 20px; }
+  label { display: block; margin: 12px 0 4px; font-size: 13px; color: #52606d; }
+  input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #cbd2d9; border-radius: 6px; font-size: 14px; }
+  button { margin-top: 18px; padding: 10px 16px; background: #2563eb; color: #fff; border: 0; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: .6; }
+  #result { margin-top: 16px; font-size: 13px; white-space: pre-wrap; }
+  .ok { color: #0a7d33; } .err { color: #b91c1c; }
+</style>
+</head>
+<body>
+<h1>手动添加供应商</h1>
+<form id="form">
+  <label>供应商名称 *</label>
+  <input name="name" required placeholder="如 DeepSeek">
+  <label>API 地址</label>
+  <input name="baseUrl" placeholder="如 https://api.deepseek.com">
+  <label>API Key</label>
+  <input name="apiKey" type="password" placeholder="sk-...（存 SecretStore，不落盘明文）">
+  <label>模型名称 *</label>
+  <input name="modelName" required placeholder="如 deepseek-chat">
+  <label>上下文（tokens）</label>
+  <input name="contextWindow" type="number" min="1" placeholder="如 65536">
+  <button type="submit">添加</button>
+</form>
+<div id="result"></div>
+<script>
+const form = document.getElementById("form");
+const result = document.getElementById("result");
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  result.className = "";
+  result.textContent = "提交中...";
+  const payload = {};
+  for (const el of form.elements) {
+    if (el.name && el.value.trim() !== "") payload[el.name] = el.value;
+  }
+  if (payload.contextWindow) payload.contextWindow = Number(payload.contextWindow);
+  try {
+    const response = await fetch("/api/model/vendors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      result.className = "err";
+      result.textContent = "添加失败: " + (body.error?.message ?? response.status);
+      return;
+    }
+    result.className = "ok";
+    result.textContent = "添加成功\\nProvider: " + body.provider.id + " (" + body.provider.kind + ")\\nModel Profile: " + body.modelProfile.name + " → " + body.modelProfile.modelName;
+    form.reset();
+  } catch (error) {
+    result.className = "err";
+    result.textContent = "请求失败: " + error;
+  }
+});
+</script>
+</body>
+</html>`);
+  }
+
   private openRunEventStream(request: IncomingMessage, response: ServerResponse, runId: string): void {
     response.writeHead(200, {
       "Cache-Control": "no-cache",
@@ -499,8 +591,7 @@ export class MultiAgentRestApiServer {
     response.once("close", unsubscribe);
   }
 
-  private async listAgentTasks(response: ServerResponse, query: URLSearchParams): Promise<void> {
-    const filter: AgentTaskFilter = {};
+  private async listAgentTasks(response: ServerResponse, query: URLSearchParams): Promise<void> {    const filter: AgentTaskFilter = {};
     const status = query.get("status");
     if (status) filter.status = status as AgentTaskRecordStatus;
     const profileId = query.get("profileId");
