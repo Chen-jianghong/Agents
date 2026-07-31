@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import type { AgentEvent, AgentProfile, AgentResult, AgentTask } from "./contracts.js";
 import type { AgentTaskFilter, AgentTaskRecord } from "./task-store.js";
+import type { AgentEventFilter, AgentEventStore } from "./event-store.js";
 import { AgentRetryError, type AgentRunOptions, type PiAgentManager } from "./manager.js";
 import type { ProfileRegistry } from "./registry.js";
 import type { AgentFactory } from "./factory.js";
@@ -30,7 +31,8 @@ export type ControlPlaneRequest =
   | ControlPlaneRequestBase<"start_run"> & { runId: string }
   | ControlPlaneRequestBase<"cancel_run"> & { runId: string }
   | ControlPlaneRequestBase<"get_run"> & { runId: string }
-  | ControlPlaneRequestBase<"list_runs">;
+  | ControlPlaneRequestBase<"list_runs">
+  | ControlPlaneRequestBase<"list_events"> & { filter?: AgentEventFilter & { runId?: string } };
 
 interface ControlPlaneRequestBase<T extends string> {
   version: typeof CONTROL_PLANE_VERSION;
@@ -61,6 +63,7 @@ export type ControlPlaneResponse =
   | ControlPlaneSuccess<RunSnapshot | null>
   | ControlPlaneSuccess<RunSnapshot[]>
   | ControlPlaneSuccess<{ runId: string; status: "cancel_requested" }>
+  | ControlPlaneSuccess<AgentEvent[]>
   | ControlPlaneFailure;
 
 export interface ControlPlaneExecutionDefaults {
@@ -79,6 +82,8 @@ export interface AgentControlPlaneOptions {
   execution?: ControlPlaneExecutionDefaults;
   /** Optional RunScheduler exposing Run/DAG commands (create_run / start_run / ...). */
   runScheduler?: RunScheduler;
+  /** Optional event store for historical event queries (list_events). */
+  eventStore?: AgentEventStore;
 }
 
 export interface ControlPlaneSuccess<T> {
@@ -152,6 +157,8 @@ export class AgentControlPlane {
           return success(request.requestId, this.getRun(request.runId));
         case "list_runs":
           return success(request.requestId, this.listRuns());
+        case "list_events":
+          return await this.listEvents(request);
       }
     } catch (error) {
       const protocolError = error instanceof ControlPlaneProtocolError
@@ -249,6 +256,24 @@ export class AgentControlPlane {
   private listRuns(): RunSnapshot[] {
     const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
     return scheduler.listRuns();
+  }
+
+  private async listEvents(
+    request: Extract<ControlPlaneRequest, { type: "list_events" }>,
+  ): Promise<ControlPlaneSuccess<AgentEvent[]>> {
+    if (!this.options.eventStore) {
+      throw new ControlPlaneProtocolError(
+        "event_store_unavailable",
+        "Historical event queries are not configured",
+      );
+    }
+    const filter: AgentEventFilter = { ...(request.filter ?? {}) };
+    if (request.filter?.runId) {
+      // Run events are stored with agentId `run:<runId>`.
+      filter.agentId = `run:${request.filter.runId}`;
+      delete (filter as { runId?: string }).runId;
+    }
+    return success(request.requestId, await this.options.eventStore.list(filter));
   }
 
   private requireRunScheduler(code: string): RunScheduler {
@@ -399,6 +424,19 @@ function parseRequest(input: unknown): ControlPlaneRequest {
       requireString(value, "runId");
       return value as unknown as ControlPlaneRequest;
     case "list_runs":
+      return value as unknown as ControlPlaneRequest;
+    case "list_events":
+      if (value.filter !== undefined) {
+        if (typeof value.filter !== "object" || value.filter === null || Array.isArray(value.filter)) {
+          throw new ControlPlaneProtocolError("invalid_request", "filter must be an object");
+        }
+        const filter = value.filter as Record<string, unknown>;
+        for (const key of ["agentId", "agentTaskId", "type", "runId"] as const) {
+          if (filter[key] !== undefined && (typeof filter[key] !== "string" || (filter[key] as string).trim().length === 0)) {
+            throw new ControlPlaneProtocolError("invalid_request", `filter.${key} must be a non-empty string`);
+          }
+        }
+      }
       return value as unknown as ControlPlaneRequest;
     default:
       throw new ControlPlaneProtocolError("unknown_command", `Unknown Control Plane command: ${value.type}`);

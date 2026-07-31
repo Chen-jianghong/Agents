@@ -9,6 +9,7 @@ import {
   AgentControlPlane,
   CONTROL_PLANE_VERSION,
   createMultiAgentRuntime,
+  FileAgentEventStore,
   PiAgentManager,
   RunScheduler,
   type AgentProfile,
@@ -100,7 +101,7 @@ function fakeManager() {
   });
 }
 
-function makeScheduler(planner: PlanPlanner, maxParallel = 2) {
+function makeScheduler(planner: PlanPlanner, maxParallel = 2, eventStore?: FileAgentEventStore) {
   const runtime = createMultiAgentRuntime();
   const manager = fakeManager();
   const scheduler = new RunScheduler({
@@ -109,6 +110,7 @@ function makeScheduler(planner: PlanPlanner, maxParallel = 2) {
     factory: runtime.factory,
     registry: runtime.registry,
     maxParallel,
+    ...(eventStore ? { eventStore } : {}),
   });
   return { runtime, manager, scheduler };
 }
@@ -116,6 +118,7 @@ function makeScheduler(planner: PlanPlanner, maxParallel = 2) {
 function makeControlPlane(
   scheduler: RunScheduler | undefined,
   execution: { cwd: string; agentDir: string } | undefined,
+  eventStore?: FileAgentEventStore,
 ) {
   const runtime = createMultiAgentRuntime();
   const manager = fakeManager();
@@ -123,6 +126,7 @@ function makeControlPlane(
     factory: runtime.factory,
     ...(execution ? { execution } : {}),
     ...(scheduler ? { runScheduler: scheduler } : {}),
+    ...(eventStore ? { eventStore } : {}),
   });
   return controlPlane;
 }
@@ -487,6 +491,87 @@ describe("Control Plane Run/DAG commands", () => {
     assert.ok(events.includes("task.running"), "task.running expected");
     assert.ok(events.includes("task.succeeded"), "task.succeeded expected");
     assert.ok(events.includes("run.succeeded"), "run.succeeded expected");
+  });
+
+  it("queries persisted Run events by runId", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cp-events-"));
+    try {
+      const eventStore = new FileAgentEventStore(join(root, "events.jsonl"));
+      const { scheduler } = makeScheduler(fakePlanner(PLANNED), 2, eventStore);
+      const controlPlane = makeControlPlane(scheduler, EXECUTION, eventStore);
+
+      const created = await controlPlane.handle({
+        version: CONTROL_PLANE_VERSION,
+        requestId: "create-events",
+        type: "create_run",
+        goal: VALID_DAG.goal,
+        workspace: process.cwd(),
+      });
+      if (!created.ok) throw new Error("create_run failed");
+      const runId = (created.data as { runId: string }).runId;
+
+      await controlPlane.handle({
+        version: CONTROL_PLANE_VERSION,
+        requestId: "start-events",
+        type: "start_run",
+        runId,
+      });
+      await scheduler.waitForRun(runId);
+      await controlPlane.flush();
+
+      const history = await controlPlane.handle({
+        version: CONTROL_PLANE_VERSION,
+        requestId: "history-1",
+        type: "list_events",
+        filter: { runId },
+      });
+      assert.equal(history.ok, true);
+      if (!history.ok) throw new Error("list_events failed");
+      const eventTypes = (history.data as Array<{ type: string }>).map((event) => event.type);
+      assert.ok(eventTypes.includes("run.created"), "run.created persisted");
+      assert.ok(eventTypes.includes("run.planning_started"), "run.planning_started persisted");
+      assert.ok(eventTypes.includes("task.running"), "task.running persisted");
+      assert.ok(eventTypes.includes("run.succeeded"), "run.succeeded persisted");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns event_store_unavailable when no event store is configured", async () => {
+    const { scheduler } = makeScheduler(fakePlanner(PLANNED));
+    const controlPlane = makeControlPlane(scheduler, EXECUTION);
+
+    const response = await controlPlane.handle({
+      version: CONTROL_PLANE_VERSION,
+      requestId: "history-unavailable",
+      type: "list_events",
+      filter: { runId: "run_x" },
+    });
+    assert.equal(response.ok, false);
+    if (!response.ok) assert.equal(response.error.code, "event_store_unavailable");
+  });
+
+  it("validates list_events filters", async () => {
+    const { scheduler } = makeScheduler(fakePlanner(PLANNED));
+    const controlPlane = makeControlPlane(scheduler, EXECUTION);
+
+    const badFilter = await controlPlane.handle({
+      version: CONTROL_PLANE_VERSION,
+      requestId: "history-bad-filter",
+      type: "list_events",
+      filter: { runId: "" },
+    });
+    assert.equal(badFilter.ok, false);
+    if (!badFilter.ok) assert.equal(badFilter.error.code, "invalid_request");
+
+    const notObject = await controlPlane.handle({
+      version: CONTROL_PLANE_VERSION,
+      requestId: "history-bad-shape",
+      type: "list_events",
+      filter: "run_x",
+    });
+    assert.equal(notObject.ok, false);
+    if (!notObject.ok) assert.equal(notObject.error.code, "invalid_request");
   });
 });
 

@@ -217,6 +217,15 @@ export class MultiAgentRestApiServer {
         return;
       case "events":
         requireMethod(request, "GET");
+        if (segments.length === 5 && segments[4] === "history") {
+          await this.reply(response, await this.controlPlane.handle({
+            version: "v1",
+            requestId: nextRequestId(),
+            type: "list_events",
+            filter: { runId },
+          }));
+          return;
+        }
         this.openRunEventStream(request, response, runId);
         return;
       default:

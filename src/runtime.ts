@@ -223,6 +223,7 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
     factory,
     ...(controlPlaneExecution ? { execution: controlPlaneExecution } : {}),
     ...(controlPlaneScheduler ? { runScheduler: controlPlaneScheduler } : {}),
+    ...(options.eventStore ? { eventStore: options.eventStore } : {}),
   });
   const createControlPlaneHttpServer = (serverOptions: ControlPlaneHttpServerOptions = {}) =>
     new ControlPlaneHttpServer(controlPlane, serverOptions);

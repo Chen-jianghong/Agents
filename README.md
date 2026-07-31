@@ -388,6 +388,7 @@ const address = await server.start(); // 默认只绑定 127.0.0.1
 | POST | `/api/runs/:runId/start` | 启动 Run（异步，立即返回 planning 快照） |
 | POST | `/api/runs/:runId/cancel` | 取消 Run |
 | GET | `/api/runs/:runId/events` | SSE 事件流（按 Run 过滤，事件用 `data:` JSON 帧推送） |
+| GET | `/api/runs/:runId/events/history` | 已持久化的历史事件（断线重连补事件） |
 | GET | `/api/agents` | 列出 Agent 任务（支持 `?status=&profileId=&runId=&parentTaskId=` 过滤） |
 | GET | `/api/agents/tasks` | 同上 |
 | GET | `/api/agents/tasks/:agentTaskId` | 单个 Agent 任务记录 |

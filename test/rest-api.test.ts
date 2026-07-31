@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import {
   AgentControlPlane,
   createMultiAgentRuntime,
+  FileAgentEventStore,
   FileAgentTaskStore,
   MultiAgentRestApiServer,
   PiAgentManager,
@@ -83,16 +84,18 @@ describe("MultiAgentRestApiServer", () => {
   let baseUrl: string;
   let controlPlane: AgentControlPlane;
   let taskStore: FileAgentTaskStore;
+  let eventStore: FileAgentEventStore;
 
   before(async () => {
     runtime = createMultiAgentRuntime();
     taskStore = new FileAgentTaskStore(join(tmpdir(), `rest-api-tasks-${Date.now()}.jsonl`));
+    eventStore = new FileAgentEventStore(join(tmpdir(), `rest-api-events-${Date.now()}.jsonl`));
     manager = new PiAgentManager(
       {
         create: async (childProfile: AgentProfile, childTask: AgentTask) =>
           fakeManagedAgent(childProfile, childTask),
       },
-      undefined,
+      eventStore,
       taskStore,
     );
     scheduler = new RunScheduler({
@@ -101,11 +104,13 @@ describe("MultiAgentRestApiServer", () => {
       factory: runtime.factory,
       registry: runtime.registry,
       maxParallel: 2,
+      eventStore,
     });
     controlPlane = new AgentControlPlane(runtime.registry, manager, {
       factory: runtime.factory,
       execution: { cwd: process.cwd(), agentDir: join(tmpdir(), "rest-api-pi") },
       runScheduler: scheduler,
+      eventStore,
     });
     server = new MultiAgentRestApiServer(controlPlane, {
       defaultWorkspace: process.cwd(),
@@ -285,6 +290,26 @@ describe("MultiAgentRestApiServer", () => {
     assert.ok(events.includes("run.planning_started"), "run.planning_started expected");
     assert.ok(events.includes("task.running"), "task.running expected");
     assert.ok(events.includes("run.succeeded"), "run.succeeded expected");
+  });
+
+  it("serves persisted Run event history", async () => {
+    const { body: createdBody } = await jsonFetch("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ goal: VALID_DAG.goal, workspace: process.cwd() }),
+    });
+    const runId = (createdBody as { runId: string }).runId;
+
+    await jsonFetch(`/api/runs/${runId}/start`, { method: "POST" });
+    await scheduler.waitForRun(runId);
+    await controlPlane.flush();
+
+    const history = await jsonFetch(`/api/runs/${runId}/events/history`);
+    assert.equal(history.status, 200);
+    const events = history.body as Array<{ type: string }>;
+    const types = events.map((event) => event.type);
+    assert.ok(types.includes("run.created"), "run.created in history");
+    assert.ok(types.includes("run.succeeded"), "run.succeeded in history");
   });
 
   it("submits Agent tasks and queries them", async () => {
