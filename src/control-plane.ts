@@ -181,6 +181,7 @@ export class AgentControlPlane {
   async flush(): Promise<void> {
     await this.manager.flushEvents();
     await this.manager.flushTasks();
+    await this.options.runScheduler?.flush();
   }
 
   private createRun(

@@ -31,6 +31,7 @@ import type {
 import { computeTaskTransitions } from "./dag.js";
 import type { ProfileRegistry } from "./registry.js";
 import type { AgentEvent } from "./contracts.js";
+import type { RunStore } from "./run-store.js";
 
 /** Role names from the DAG mapped onto built-in execution profiles. */
 const ROLE_PROFILE_MAP: Record<string, string> = {
@@ -78,6 +79,8 @@ export interface RunSchedulerOptions {
   maxParallel?: number;
   now?: () => string;
   eventStore?: AgentEventStore;
+  /** Persist Run snapshots so terminal Runs survive a host restart. */
+  runStore?: RunStore;
 }
 
 interface RunTaskState {
@@ -113,6 +116,7 @@ export class RunScheduler {
   private readonly waiters = new Map<string, Array<(result: RunResult) => void>>();
   private readonly results = new Map<string, RunResult>();
   private eventSequence = 0;
+  private runWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: RunSchedulerOptions) {}
 
@@ -145,7 +149,40 @@ export class RunScheduler {
     };
     this.runs.set(run.runId, run);
     this.emit(run, "run.created", { runId: run.runId, goal: run.goal });
+    this.persist(run);
     return this.snapshot(run);
+  }
+
+  /**
+   * Load persisted Run snapshots into memory. Terminal Runs are restored
+   * as-is; interrupted Runs (created/planning/ready/running) become
+   * "failed" with host_restarted because their execution context (Planner
+   * session, live Agents) no longer exists. Task-level recovery is handled
+   * by FileAgentTaskStore + retry_agent.
+   */
+  async loadRuns(): Promise<RunSnapshot[]> {
+    if (!this.options.runStore) return [];
+    await this.runWriteQueue;
+    const restored: RunSnapshot[] = [];
+    for (const snapshot of await this.options.runStore.list()) {
+      const terminal = isTerminal(snapshot.status);
+      const status = terminal ? snapshot.status : "failed";
+      const state = this.stateFromSnapshot(snapshot, status);
+      if (!terminal) {
+        state.error = { code: "host_restarted", message: "Host restarted while the Run was in progress" };
+      }
+      this.runs.set(state.runId, state);
+      if (isTerminal(status)) {
+        this.results.set(state.runId, resultFromState(state));
+      }
+      restored.push(this.snapshot(state));
+    }
+    return restored;
+  }
+
+  /** Wait for all pending Run snapshot writes to settle. */
+  async flush(): Promise<void> {
+    await this.runWriteQueue;
   }
 
   /** Plan the Run's goal into a TaskDAG and start scheduling its tasks. */
@@ -503,6 +540,51 @@ export class RunScheduler {
     if (this.options.eventStore) {
       void this.options.eventStore.append(event);
     }
+    this.persist(run);
+  }
+
+  /** Serialize Run snapshot writes so they never interleave. */
+  private persist(run: RunState): void {
+    if (!this.options.runStore) return;
+    const snapshot = this.snapshot(run);
+    this.runWriteQueue = this.runWriteQueue
+      .then(() => this.options.runStore!.save(snapshot))
+      .catch(() => {
+        // Persistence is best-effort for live progress; the event store
+        // remains the source of truth for recovery.
+      });
+  }
+
+  private stateFromSnapshot(snapshot: RunSnapshot, status: RunStatus): RunState {
+    const tasks = new Map<string, RunTaskState>();
+    if (snapshot.dag) {
+      for (const planTask of snapshot.dag.tasks) {
+        const snap = snapshot.tasks.find((task) => task.taskId === planTask.id);
+        tasks.set(planTask.id, {
+          planTask,
+          status: snap?.status ?? "pending",
+          ...(snap?.agentTaskId ? { agentTaskId: snap.agentTaskId } : {}),
+          ...(snap?.profileId ? { profileId: snap.profileId } : {}),
+          ...(snap?.result ? { result: snap.result as AgentResult } : {}),
+          ...(snap?.error ? { error: snap.error } : {}),
+        });
+      }
+    }
+    return {
+      runId: snapshot.runId,
+      status,
+      goal: snapshot.goal,
+      workspace: snapshot.workspace,
+      agentDir: snapshot.workspace,
+      maxParallel: snapshot.maxParallel,
+      ...(snapshot.dag ? { dag: snapshot.dag } : {}),
+      tasks,
+      ...(snapshot.error ? { error: snapshot.error } : {}),
+      createdAt: snapshot.createdAt,
+      updatedAt: snapshot.updatedAt,
+      cancellationRequested: false,
+      scheduling: false,
+    };
   }
 
   private requireRun(runId: string): RunState {
@@ -559,6 +641,28 @@ function hasActiveTasks(run: RunState): boolean {
 
 function isTerminal(status: RunStatus): boolean {
   return status === "succeeded" || status === "failed" || status === "cancelled";
+}
+
+function resultFromState(run: RunState): RunResult {
+  return {
+    runId: run.runId,
+    status: run.status as RunResult["status"],
+    goal: run.goal,
+    tasks: [...run.tasks.values()].map((task) => ({
+      taskId: task.planTask.id,
+      title: task.planTask.title,
+      role: task.planTask.role,
+      status: task.status,
+      dependsOn: task.planTask.dependsOn,
+      writePaths: task.planTask.writePaths,
+      ...(task.planTask.modelProfile ? { modelProfile: task.planTask.modelProfile } : {}),
+      ...(task.agentTaskId ? { agentTaskId: task.agentTaskId } : {}),
+      ...(task.profileId ? { profileId: task.profileId } : {}),
+      ...(task.error ? { error: task.error } : {}),
+      ...(task.result ? { result: task.result } : {}),
+    })),
+    ...(run.error ? { error: run.error } : {}),
+  };
 }
 
 function planFailureMessage(reason: { code: string; message?: string; issues?: { message: string }[] }): string {

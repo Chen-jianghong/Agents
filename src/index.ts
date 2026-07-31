@@ -26,5 +26,6 @@ export * from "./plan-contracts.js";
 export * from "./dag.js";
 export * from "./planner.js";
 export * from "./run-scheduler.js";
+export * from "./run-store.js";
 export * from "./model-config.js";
 export * from "./model-config-service.js";

@@ -268,6 +268,19 @@ const runs = await runtime.controlPlane.handle({
 - 未配置 `controlPlaneScheduler` 时 Run 命令返回 `run_submission_unavailable` / `run_scheduler_unavailable`；`workspace` 与宿主工作区不一致返回 `run_workspace_mismatch`；
 - 共享实例通过 `runtime.controlPlaneScheduler` 暴露，宿主可以用 `waitForRun(runId)` 等待终态。
 
+### Run 持久化与重启恢复
+
+配置 `runStore` 后，Run 的每个状态变化都会持久化为快照（JSON 文件）。宿主重启后用 `createMultiAgentRuntimeAsync()` 创建 runtime 时会自动 `loadRuns()`：**终态 Run 原样恢复**（`get_run` / `waitForRun` 立即可用），**中断的 Run 标记为 `failed`（`host_restarted`）**，任务级恢复仍由 `FileAgentTaskStore` + `retry_agent` 承担：
+
+```ts
+const runtime = await createMultiAgentRuntimeAsync({
+  runStore: new FileRunStore(".multi-agent-dev/runs"),
+  controlPlaneExecution: { cwd, agentDir },
+  controlPlaneScheduler: { maxParallel: 4 },
+  // ...模型配置
+});
+```
+
 Task Store 会保存提交时绑定的 Profile 快照，以及不含 ModelRuntime、ModelGateway、凭据或 Workspace Provider 实例的安全执行快照。Manager 重启后可以通过 `retry_agent` 恢复失败、取消、超时或孤儿运行任务，但跨进程恢复必须由宿主注入 `taskRecovery.resolveExecution`；宿主需要重新提供 `cwd`、`agentDir`、模型运行时、模型路由、凭据边界和工作区 Provider。没有恢复解析器时，Runtime 会返回结构化的 `agent_retry_execution_unavailable`，不会猜测使用当前同名 Profile 或绕过原有工作区隔离。
 
 如果需要从 UI、Worker 或其他宿主提交后台 Agent 任务，必须由宿主显式配置执行工作区和 Agent 目录。提交时只传 Profile ID 与序列化任务，Runtime 会先按任务边界绑定 Profile，再调用 `PiAgentManager.runBackground`：
@@ -428,6 +441,7 @@ src/
 ├── manager.ts               # Agent Session 生命周期和结果
 ├── event-store.ts           # JSONL Agent 事件存储和敏感字段脱敏
 ├── task-store.ts            # Agent 任务状态/结果快照和恢复
+├── run-store.ts             # Run 快照持久化与重启恢复（中断 Run → host_restarted）
 ├── workspace.ts              # Passthrough/Git Worktree 工作区 Provider
 ├── control-plane.ts         # v1 控制面 DTO、命令分发和事件订阅
 ├── control-plane-http.ts    # HTTP JSON/SSE transport 和鉴权钩子

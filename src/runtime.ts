@@ -35,6 +35,7 @@ import {
   MultiAgentRestApiServer,
   type MultiAgentRestApiServerOptions,
 } from "./rest-api.js";
+import type { RunStore } from "./run-store.js";
 import type { ControlPlaneExecutionDefaults } from "./control-plane.js";
 import { PlannerService } from "./planner.js";
 import { RunScheduler } from "./run-scheduler.js";
@@ -53,6 +54,8 @@ export interface MultiAgentRuntimeOptions {
   profileStore?: FileProfileStore;
   eventStore?: AgentEventStore;
   taskStore?: AgentTaskStore;
+  /** Persist Run snapshots so terminal Runs survive a host restart. */
+  runStore?: RunStore;
   /** JSON store for the model configuration center. */
   modelConfigStore?: FileModelConfigStore;
   /** Host secret vault referenced by provider apiKeySecretRef. */
@@ -89,6 +92,7 @@ export interface RuntimeRunSchedulerOptions {
   modelAliases?: ModelAliases;
   modelGateway?: ModelGateway;
   eventStore?: AgentEventStore;
+  runStore?: RunStore;
 }
 
 export interface MultiAgentRuntime {
@@ -105,6 +109,7 @@ export interface MultiAgentRuntime {
   readonly persistentProfiles?: PersistentProfileService;
   readonly eventStore?: AgentEventStore;
   readonly taskStore?: AgentTaskStore;
+  readonly runStore?: RunStore;
   readonly modelConfig?: ModelConfigService;
   readonly controlPlane: AgentControlPlane;
   /** Shared RunScheduler mounted on the Control Plane (when configured). */
@@ -194,6 +199,7 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
       ...(schedulerModelGateway ? { modelGateway: schedulerModelGateway } : {}),
       ...(schedulerOptions.maxParallel !== undefined ? { maxParallel: schedulerOptions.maxParallel } : {}),
       ...(schedulerOptions.eventStore ?? options.eventStore ? { eventStore: schedulerOptions.eventStore ?? options.eventStore } : {}),
+      ...(schedulerOptions.runStore ?? options.runStore ? { runStore: schedulerOptions.runStore ?? options.runStore } : {}),
     });
   };
 
@@ -280,6 +286,7 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
     ...(options.profileStore ? { profileStore: options.profileStore } : {}),
     ...(options.eventStore ? { eventStore: options.eventStore } : {}),
     ...(options.taskStore ? { taskStore: options.taskStore } : {}),
+    ...(options.runStore ? { runStore: options.runStore } : {}),
     ...(modelConfig ? { modelConfig } : {}),
     controlPlane,
     ...(controlPlaneScheduler ? { controlPlaneScheduler } : {}),
@@ -309,6 +316,11 @@ export async function createMultiAgentRuntimeAsync(
     // Load persisted Providers / Model Profiles / Role Bindings and re-seed
     // any missing defaults. Config changes take effect for new sessions.
     await runtime.modelConfig.load();
+  }
+  if (options.runStore && runtime.controlPlaneScheduler) {
+    // Restore persisted Runs: terminal ones as-is, interrupted ones as
+    // host_restarted failures (task recovery via retry_agent).
+    await runtime.controlPlaneScheduler.loadRuns();
   }
   return runtime;
 }
