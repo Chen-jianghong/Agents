@@ -25,7 +25,25 @@ npm run typecheck
 npm test
 ```
 
-当前测试不需要 API Key。它们验证 Profile、权限裁剪、路径边界、分层 Registry、持久 Profile 审批、主 Agent 编排工具、Manager 事件桥、JSONL 事件持久化和脱敏、任务状态/结果恢复、超时/最大回合/并发限制、token/cost 用量统计和成本上限、真实 Pi Session 创建、Task DAG 校验与拓扑排序、Planner 输出解析校验、RunScheduler 依赖调度/失败传播/取消、模型配置中心持久化/密钥边界/角色解析，以及 Pi faux Provider 驱动的 Main Agent -> `spawn_agent` -> Sub Agent、Planner -> RunScheduler -> 真实 Manager、配置中心驱动新 Session 的端到端闭环；不会访问外部模型服务。
+当前测试不需要 API Key。它们验证 Profile、权限裁剪、路径边界、分层 Registry、持久 Profile 审批、主 Agent 编排工具、Manager 事件桥、JSONL 事件持久化和脱敏、任务状态/结果恢复、超时/最大回合/并发限制、token/cost 用量统计和成本上限、真实 Pi Session 创建、Task DAG 校验与拓扑排序、Planner 输出解析校验、RunScheduler 依赖调度/失败传播/取消、模型配置中心持久化/密钥边界/角色解析、REST API 与 SSE 事件流、端到端验证脚本（faux Provider 自检），以及 Pi faux Provider 驱动的 Main Agent -> `spawn_agent` -> Sub Agent、Planner -> RunScheduler -> 真实 Manager、配置中心驱动新 Session 的端到端闭环；不会访问外部模型服务。
+
+## 真实 Provider 端到端验证
+
+`examples/e2e-real-provider.mjs` 跑通完整链路：自然语言需求 → Planner 生成 DAG → RunScheduler 并行调度 → Worker 执行 → 结果收集（token/cost 统计）。支持 Pi 0.83 内置的全部 Provider（deepseek / openai / anthropic / moonshotai / zai / google 等），API Key 从 Provider 约定的环境变量或 `--api-key` 读取：
+
+```bash
+# 方式 A：直接设置 Provider 约定变量（DeepSeek 读 DEEPSEEK_API_KEY）
+DEEPSEEK_API_KEY=sk-xxx node examples/e2e-real-provider.mjs --provider deepseek --model deepseek-chat
+
+# 方式 B：E2E_* 变量
+E2E_PROVIDER=deepseek E2E_API_KEY=sk-xxx node examples/e2e-real-provider.mjs \
+  --goal "在 workspace 下创建 data/hello.txt，内容为 Hello Multi-Agent"
+
+# 自检模式（faux provider，不访问外部模型，验证脚本链路）
+node examples/e2e-real-provider.mjs --self-test
+```
+
+脚本默认在 `.e2e-workspace` 下执行（自动 `git init`，不污染主仓库），可传 `--workspace` / `--max-parallel` / `--goal` 定制；结束时输出每个任务的状态与 token/cost 汇总。没有 API Key 时脚本会打印各 Provider 的配置指引并以非零码退出。
 
 ## 当前入口
 

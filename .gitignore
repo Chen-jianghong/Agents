@@ -5,3 +5,4 @@ dist/
 *.log
 .reasonix/
 *.7z
+.e2e-workspace/
