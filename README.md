@@ -57,7 +57,35 @@ node examples/worker-demo.mjs
 WORKER_TOKEN=dev-token node examples/worker-demo.mjs --real
 ```
 
-Worker 通过 `WORKER_TOKEN` 鉴权握手，`WORKER_WORKSPACE` / `WORKER_AGENT_DIR` 控制工作区与持久化位置。这是企划书「Control Plane → Worker Manager → 独立 Node 进程 → Pi Agent Core」的落地示例；分布式队列调度与容器隔离是后续阶段。
+Worker 通过 `WORKER_TOKEN` 鉴权握手，`WORKER_WORKSPACE` / `WORKER_AGENT_DIR` 控制工作区与持久化位置。这是企划书「Control Plane → Worker Manager → 独立 Node 进程 → Pi Agent Core」的落地示例。
+
+### Worker 分布式队列调度（Run 任务跨进程执行）
+
+`WorkerRunTaskManager` 把 RunScheduler 的任务真正提交到独立 Worker 进程执行（`register_profile` 上传 Profile 快照 → `run_agent` 提交 → 轮询结果）；`WorkerRunPool` 在多个 Worker 进程间按 round-robin 分配任务并限制每个 Worker 的并发：
+
+```ts
+const worker = runtime.createControlPlaneWorkerProcess({
+  command: process.execPath,
+  args: [workerEntry],
+  token: process.env.WORKER_TOKEN,
+  env: { WORKER_TOKEN, WORKER_WORKSPACE, WORKER_FAUX: "1", PATH: process.env.PATH },
+});
+await worker.start();
+
+const workerManager = new WorkerRunTaskManager({ worker, pollIntervalMs: 100 });
+const pool = new WorkerRunPool({ workers: [workerManager], maxConcurrentPerWorker: 2 });
+
+const scheduler = new RunScheduler({
+  planner,
+  manager: pool, // 任务在 Worker 进程执行，而非宿主进程
+  factory: runtime.factory,
+  registry: runtime.registry,
+  modelRuntime,
+  modelAliases,
+});
+```
+
+Worker 掉线时任务返回 `worker_result_timeout` / `scheduler_error` 并正常传播到 Run 终态。分布式队列调度与容器隔离是后续阶段。
 
 ### 开发服务器（供应商管理入口）
 
@@ -485,6 +513,7 @@ src/
 ├── event-store.ts           # JSONL Agent 事件存储和敏感字段脱敏
 ├── task-store.ts            # Agent 任务状态/结果快照和恢复
 ├── run-store.ts             # Run 快照持久化与重启恢复（中断 Run → host_restarted）
+├── worker-run-manager.ts    # WorkerRunTaskManager/WorkerRunPool：Run 任务跨进程队列调度
 ├── workspace.ts              # Passthrough/Git Worktree 工作区 Provider
 ├── control-plane.ts         # v1 控制面 DTO、命令分发和事件订阅
 ├── control-plane-http.ts    # HTTP JSON/SSE transport 和鉴权钩子

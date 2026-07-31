@@ -29,3 +29,4 @@ export * from "./run-scheduler.js";
 export * from "./run-store.js";
 export * from "./model-config.js";
 export * from "./model-config-service.js";
+export * from "./worker-run-manager.js";

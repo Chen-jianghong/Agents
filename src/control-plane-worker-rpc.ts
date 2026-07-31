@@ -313,6 +313,10 @@ export class ControlPlaneWorkerRpcClient {
     const response = new Promise<ControlPlaneResponse>((resolve, reject) => {
       this.pending.set(request.requestId, { resolve, reject });
     });
+    // fail() may reject this promise while send() is still awaiting the
+    // output write. Attach a no-op handler so that rejection never hits the
+    // unhandled-rejection window before the caller awaits the response.
+    void response.catch(() => undefined);
     const sent = await this.writer.send(request);
     if (!sent) {
       this.pending.delete(request.requestId);
