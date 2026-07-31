@@ -71,6 +71,21 @@ npm run dev-server            # 或 node examples/dev-server.mjs --port 8787 --d
 - API Key 存入 `<data>/secrets.json`（本地文件 SecretStore，演示用；生产替换为宿主 SecretStore），Provider 配置只保留 `apiKeySecretRef` 引用；
 - 同时提供模型配置中心、Run 调度和 Control Plane 的完整 REST 接口。
 
+### Windows 桌面应用（EXE）
+
+Electron + React 桌面客户端（企划书 Phase 6 起步），内置完整 Runtime，不需要浏览器：
+
+```bash
+npm run build:desktop        # 编译主进程 + 渲染进程
+npm run desktop:dev          # 本地运行桌面应用（开发验证）
+npm run dist:desktop         # 打包 NSIS 安装包 → apps/desktop/release/Multi-Agent Dev Setup *.exe
+```
+
+- **架构**：主进程内置 `createMultiAgentRuntimeAsync` + 回环 REST server（随机端口）；`preload.cts`（CJS）通过 `contextBridge` 只暴露 API 地址，渲染进程（React）用 fetch 访问 REST API，不接触 Node/Pi 对象（contextIsolation + sandbox）；
+- **界面**：供应商管理页（添加表单：名称 / API 地址 / API Key / 模型名称 / 上下文 + 已配置供应商列表与删除）；
+- **数据**：存于 `%APPDATA%/multi-agent-dev-runtime/data/`（模型配置 / secrets.json / runs），API Key 不落 Provider 配置；
+- **安全**：CSP 限制 `connect-src http://127.0.0.1:*`，回环绑定，Renderer 无 Node 能力。
+
 ## 当前入口
 
 ```ts
