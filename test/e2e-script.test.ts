@@ -91,4 +91,33 @@ describe("e2e-real-provider.mjs", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   });
+
+  it("runs the Worker demo end to end (worker-entry + worker-demo)", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "worker-demo-"));
+    try {
+      const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+        const child = spawn(process.execPath, [join(root, "examples", "worker-demo.mjs")], {
+          cwd: root,
+          env: {
+            ...withoutKeys(),
+            WORKER_WORKSPACE: workspace,
+            PATH: process.env.PATH,
+          },
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+        child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+        child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
+      });
+      assert.equal(result.code, 0, `stderr: ${result.stderr}`);
+      assert.match(result.stdout, /worker started/);
+      assert.match(result.stdout, /profiles: researcher, coder, tester, reviewer/);
+      assert.match(result.stdout, /run_agent: \{"agentId":"builtin_researcher"/);
+      assert.match(result.stdout, /result: \{"agentId":"builtin_researcher".*"status":"completed"/);
+      assert.match(result.stdout, /worker stopped/);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
 });

@@ -45,6 +45,20 @@ node examples/e2e-real-provider.mjs --self-test
 
 脚本默认在 `.e2e-workspace` 下执行（自动 `git init`，不污染主仓库），可传 `--workspace` / `--max-parallel` / `--goal` 定制；结束时输出每个任务的状态与 token/cost 汇总。没有 API Key 时脚本会打印各 Provider 的配置指引并以非零码退出。
 
+### 独立 Worker 进程（分布式执行雏形）
+
+`examples/worker-entry.mjs` 是 Worker 进程入口：独立进程内运行完整 Runtime，通过 JSONL RPC（stdin/stdout）向宿主暴露 Control Plane 能力，事件/任务/Run 持久化到 Worker 自己的目录。`examples/worker-demo.mjs` 演示宿主侧启动 Worker、提交任务并取回结果：
+
+```bash
+# 自检（faux provider，不访问外部模型）
+node examples/worker-demo.mjs
+
+# 真实模型（先配置 Provider 环境变量，如 DEEPSEEK_API_KEY）
+WORKER_TOKEN=dev-token node examples/worker-demo.mjs --real
+```
+
+Worker 通过 `WORKER_TOKEN` 鉴权握手，`WORKER_WORKSPACE` / `WORKER_AGENT_DIR` 控制工作区与持久化位置。这是企划书「Control Plane → Worker Manager → 独立 Node 进程 → Pi Agent Core」的落地示例；分布式队列调度与容器隔离是后续阶段。
+
 ## 当前入口
 
 ```ts
