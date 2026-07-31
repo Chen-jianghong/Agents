@@ -63,7 +63,7 @@ export interface RunTaskManager {
     profile: AgentProfile,
     task: AgentTask,
     options: AgentRunOptions,
-  ): BackgroundAgentRun;
+  ): Promise<BackgroundAgentRun>;
   cancel(agentId: string): Promise<void>;
 }
 
@@ -438,7 +438,7 @@ export class RunScheduler {
       ...(this.options.modelAliases ? { modelAliases: this.options.modelAliases } : {}),
       ...(this.options.modelGateway ? { modelGateway: this.options.modelGateway } : {}),
     };
-    const background = this.options.manager.runBackground(profile, agentTask, runOptions);
+    const background = await this.options.manager.runBackground(profile, agentTask, runOptions);
     task.agentTaskId = background.agentTaskId;
     return background.promise;
   }

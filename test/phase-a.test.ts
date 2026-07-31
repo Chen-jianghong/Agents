@@ -1364,18 +1364,18 @@ describe("Phase A agent runtime", () => {
     };
 
     try {
-      const first = manager.runBackground(
+      const first = await manager.runBackground(
         profile({ id: "queue-agent-one" }),
         { ...task, id: "queue-one" },
         options,
       );
       await firstStarted;
-      const second = manager.runBackground(
+      const second = await manager.runBackground(
         profile({ id: "queue-agent-two" }),
         { ...task, id: "queue-two" },
         options,
       );
-      const third = manager.runBackground(
+      const third = await manager.runBackground(
         profile({ id: "queue-agent-three" }),
         { ...task, id: "queue-three" },
         options,

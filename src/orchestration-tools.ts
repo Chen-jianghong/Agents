@@ -144,7 +144,7 @@ function delegateTool(
       const bound = factory.bindProfile(profile, task);
       const options = getRunOptions(context);
       if (params.runMode === "background") {
-        const run = manager.runBackground(bound.profile, task, options);
+        const run = await manager.runBackground(bound.profile, task, options);
         return toolResult({
           agentId: bound.profile.id,
           agentTaskId: run.agentTaskId,

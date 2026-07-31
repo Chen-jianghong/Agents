@@ -306,11 +306,11 @@ export class PiAgentManager {
     }
   }
 
-  runBackground(
+  async runBackground(
     profile: AgentProfile,
     task: AgentTask,
     options: AgentRunOptions,
-  ): BackgroundAgentRun {
+  ): Promise<BackgroundAgentRun> {
     return this.startBackground(profile, task, options, false);
   }
 

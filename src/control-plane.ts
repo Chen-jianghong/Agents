@@ -138,7 +138,7 @@ export class AgentControlPlane {
         case "get_result":
           return success(request.requestId, (await this.manager.getResult(request.agentTaskId)) ?? null);
         case "run_agent":
-          return this.runAgent(request);
+          return await this.runAgent(request);
         case "retry_agent":
           return await this.retryAgent(request);
         case "cancel_agent":
@@ -287,15 +287,15 @@ export class AgentControlPlane {
     return this.options.runScheduler;
   }
 
-  private runAgent(
+  private async runAgent(
     request: Extract<ControlPlaneRequest, { type: "run_agent" }>,
-  ): ControlPlaneSuccess<{
+  ): Promise<ControlPlaneSuccess<{
     agentId: string;
     agentTaskId: string;
     attempt: number;
     status: "queued" | "running";
     warnings: string[];
-  }> {
+  }>> {
     if (!this.options.factory || !this.options.execution) {
       throw new ControlPlaneProtocolError(
         "task_submission_unavailable",
@@ -323,7 +323,7 @@ export class AgentControlPlane {
     }
     const bound = this.options.factory.bindProfile(profile, request.task);
     const execution = this.options.execution;
-    const run = this.manager.runBackground(bound.profile, request.task, {
+    const run = await this.manager.runBackground(bound.profile, request.task, {
       cwd: execution.cwd,
       agentDir: execution.agentDir,
       ...(execution.modelRuntime ? { modelRuntime: execution.modelRuntime } : {}),

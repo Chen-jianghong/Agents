@@ -43,7 +43,7 @@ class FakeManager implements RunTaskManager {
   readonly calls: FakeCall[] = [];
   readonly cancelledAgents: string[] = [];
 
-  runBackground(profile: AgentProfile, task: AgentTask, options: AgentRunOptions): BackgroundAgentRun {
+  async runBackground(profile: AgentProfile, task: AgentTask, options: AgentRunOptions): Promise<BackgroundAgentRun> {
     let resolve!: (result: AgentResult) => void;
     const promise = new Promise<AgentResult>((res) => {
       resolve = res;
