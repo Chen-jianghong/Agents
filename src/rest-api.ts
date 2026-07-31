@@ -22,6 +22,7 @@ import {
 } from "./control-plane.js";
 import type { AgentTaskFilter, AgentTaskRecordStatus } from "./task-store.js";
 import type { AgentTask } from "./contracts.js";
+import type { ModelConfigService, ProviderInput, ModelProfileInput } from "./model-config-service.js";
 
 export interface MultiAgentRestApiServerOptions {
   host?: string;
@@ -30,6 +31,8 @@ export interface MultiAgentRestApiServerOptions {
   authorize?: (request: IncomingMessage) => boolean | Promise<boolean>;
   /** Workspace used when POST /api/runs omits `workspace`. */
   defaultWorkspace?: string;
+  /** Model configuration center endpoints (/api/model/*). */
+  modelConfig?: ModelConfigService;
 }
 
 export interface RestApiAddress {
@@ -52,7 +55,7 @@ export class MultiAgentRestApiServer {
   private server: Server | undefined;
   private address: RestApiAddress | undefined;
   private readonly options: Required<Pick<MultiAgentRestApiServerOptions, "host" | "port" | "maxBodyBytes">>
-    & Pick<MultiAgentRestApiServerOptions, "authorize" | "defaultWorkspace">;
+    & Pick<MultiAgentRestApiServerOptions, "authorize" | "defaultWorkspace" | "modelConfig">;
 
   constructor(
     private readonly controlPlane: AgentControlPlane,
@@ -64,6 +67,7 @@ export class MultiAgentRestApiServer {
       maxBodyBytes: options.maxBodyBytes ?? 1024 * 1024,
       ...(options.authorize ? { authorize: options.authorize } : {}),
       ...(options.defaultWorkspace !== undefined ? { defaultWorkspace: options.defaultWorkspace } : {}),
+      ...(options.modelConfig ? { modelConfig: options.modelConfig } : {}),
     };
   }
 
@@ -132,6 +136,9 @@ export class MultiAgentRestApiServer {
           return;
         case "agents":
           await this.handleAgents(request, response, segments, query);
+          return;
+        case "model":
+          await this.handleModel(request, response, segments);
           return;
         default:
           throw new RestApiError(404, "Route not found");
@@ -293,6 +300,165 @@ export class MultiAgentRestApiServer {
       return;
     }
 
+    throw new RestApiError(404, "Route not found");
+  }
+
+  private async handleModel(
+    request: IncomingMessage,
+    response: ServerResponse,
+    segments: string[],
+  ): Promise<void> {
+    const modelConfig = this.options.modelConfig;
+    if (!modelConfig) {
+      throw new RestApiError(503, "Model configuration center is not configured");
+    }
+    if (segments.length < 3) throw new RestApiError(404, "Route not found");
+
+    const resource = segments[2];
+    switch (resource) {
+      case "providers":
+        await this.handleModelProviders(request, response, modelConfig, segments);
+        return;
+      case "profiles":
+        await this.handleModelProfiles(request, response, modelConfig, segments);
+        return;
+      case "role-bindings":
+        await this.handleRoleBindings(request, response, modelConfig, segments);
+        return;
+      default:
+        throw new RestApiError(404, "Route not found");
+    }
+  }
+
+  private async handleModelProviders(
+    request: IncomingMessage,
+    response: ServerResponse,
+    modelConfig: ModelConfigService,
+    segments: string[],
+  ): Promise<void> {
+    if (segments.length === 3) {
+      requireMethod(request, "GET");
+      writeJson(response, 200, modelConfig.listProviders());
+      return;
+    }
+    if (segments.length === 4) {
+      const providerId = decodeSegment(segments[3]!);
+      if (request.method === "GET") {
+        const provider = modelConfig.getProvider(providerId);
+        if (!provider) throw new RestApiError(404, "Provider not found");
+        writeJson(response, 200, provider);
+        return;
+      }
+      if (request.method === "PUT") {
+        const body = await readJsonBody(request, this.options.maxBodyBytes);
+        const input: ProviderInput = { ...body, id: providerId } as ProviderInput;
+        try {
+          const saved = await modelConfig.upsertProvider(input);
+          writeJson(response, 200, saved);
+        } catch (error) {
+          if (error instanceof Error && error.name === "ModelConfigValidationError") {
+            throw new RestApiError(422, error.message);
+          }
+          throw error;
+        }
+        return;
+      }
+      if (request.method === "DELETE") {
+        await modelConfig.removeProvider(providerId);
+        writeJson(response, 200, { deleted: providerId });
+        return;
+      }
+      throw new RestApiError(405, "Method not allowed");
+    }
+    throw new RestApiError(404, "Route not found");
+  }
+
+  private async handleModelProfiles(
+    request: IncomingMessage,
+    response: ServerResponse,
+    modelConfig: ModelConfigService,
+    segments: string[],
+  ): Promise<void> {
+    if (segments.length === 3) {
+      requireMethod(request, "GET");
+      writeJson(response, 200, modelConfig.listModelProfiles());
+      return;
+    }
+    if (segments.length === 4) {
+      const profileName = decodeSegment(segments[3]!);
+      if (request.method === "GET") {
+        const profile = modelConfig.getModelProfile(profileName);
+        if (!profile) throw new RestApiError(404, "Model profile not found");
+        writeJson(response, 200, profile);
+        return;
+      }
+      if (request.method === "PUT") {
+        const body = await readJsonBody(request, this.options.maxBodyBytes);
+        const input: ModelProfileInput = { ...body, name: profileName } as ModelProfileInput;
+        try {
+          const saved = await modelConfig.upsertModelProfile(input);
+          writeJson(response, 200, saved);
+        } catch (error) {
+          if (error instanceof Error && error.name === "ModelConfigValidationError") {
+            throw new RestApiError(422, error.message);
+          }
+          throw error;
+        }
+        return;
+      }
+      if (request.method === "DELETE") {
+        await modelConfig.removeModelProfile(profileName);
+        writeJson(response, 200, { deleted: profileName });
+        return;
+      }
+      throw new RestApiError(405, "Method not allowed");
+    }
+    throw new RestApiError(404, "Route not found");
+  }
+
+  private async handleRoleBindings(
+    request: IncomingMessage,
+    response: ServerResponse,
+    modelConfig: ModelConfigService,
+    segments: string[],
+  ): Promise<void> {
+    if (segments.length === 3) {
+      requireMethod(request, "GET");
+      writeJson(response, 200, modelConfig.listRoleBindings());
+      return;
+    }
+    if (segments.length === 4) {
+      const role = decodeSegment(segments[3]!);
+      if (request.method === "GET") {
+        const binding = modelConfig.getRoleBinding(role);
+        if (!binding) throw new RestApiError(404, "Role binding not found");
+        writeJson(response, 200, binding);
+        return;
+      }
+      if (request.method === "PUT") {
+        const body = await readJsonBody(request, this.options.maxBodyBytes);
+        const modelProfileId = requireField(body, "modelProfileId");
+        const fallback = typeof body.fallbackModelProfileId === "string"
+          ? body.fallbackModelProfileId
+          : undefined;
+        try {
+          const saved = await modelConfig.setRoleBinding(role, modelProfileId, fallback);
+          writeJson(response, 200, saved);
+        } catch (error) {
+          if (error instanceof Error && error.name === "ModelConfigValidationError") {
+            throw new RestApiError(422, error.message);
+          }
+          throw error;
+        }
+        return;
+      }
+      if (request.method === "DELETE") {
+        await modelConfig.removeRoleBinding(role);
+        writeJson(response, 200, { deleted: role });
+        return;
+      }
+      throw new RestApiError(405, "Method not allowed");
+    }
     throw new RestApiError(404, "Route not found");
   }
 

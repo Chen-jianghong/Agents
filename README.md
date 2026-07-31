@@ -395,8 +395,14 @@ const address = await server.start(); // 默认只绑定 127.0.0.1
 | GET | `/api/agents/results/:agentTaskId` | Agent 任务结果 |
 | POST | `/api/agents/run` | 提交后台 Agent 任务 `{ profileId, task }` |
 | POST | `/api/agents/:agentId/cancel` | 取消 Agent |
+| GET | `/api/model/providers` | 列出 Provider（配置中心） |
+| GET/PUT/DELETE | `/api/model/providers/:id` | 读取/新增更新/删除 Provider（明文 `apiKey` 拒绝 → 422） |
+| GET | `/api/model/profiles` | 列出 Model Profile |
+| GET/PUT/DELETE | `/api/model/profiles/:name` | 读取/新增更新/删除 Model Profile（版本号自动递增） |
+| GET | `/api/model/role-bindings` | 列出角色模型绑定 |
+| GET/PUT/DELETE | `/api/model/role-bindings/:role` | 读取/设置/删除角色绑定（新任务立即使用新配置） |
 
-错误码映射：`invalid_request` 系 → 400，`*_not_found` → 404，`*_mismatch` / `agent_depth_limit` → 422，`*_unavailable` → 503，鉴权失败 → 401。
+错误码映射：`invalid_request` 系 → 400，`*_not_found` → 404，`*_mismatch` / `agent_depth_limit` / 模型配置校验失败 → 422，`*_unavailable` → 503，鉴权失败 → 401。
 
 ## 目录
 

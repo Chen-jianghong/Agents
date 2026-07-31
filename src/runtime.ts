@@ -241,6 +241,9 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
       ...(apiOptions.defaultWorkspace === undefined && controlPlaneExecution
         ? { defaultWorkspace: controlPlaneExecution.cwd }
         : {}),
+      ...(apiOptions.modelConfig === undefined && modelConfig
+        ? { modelConfig }
+        : {}),
     });
   const mainAgentFactory = new MainAgentFactory(sessionFactory, factory, registry, manager);
   const persistentProfiles = options.profileStore
