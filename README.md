@@ -25,7 +25,7 @@ npm run typecheck
 npm test
 ```
 
-当前测试不需要 API Key。它们验证 Profile、权限裁剪、路径边界、分层 Registry、持久 Profile 审批、主 Agent 编排工具、Manager 事件桥、JSONL 事件持久化和脱敏、任务状态/结果恢复、超时/最大回合/并发限制、token/cost 用量统计和成本上限、真实 Pi Session 创建、Task DAG 校验与拓扑排序、Planner 输出解析校验、RunScheduler 依赖调度/失败传播/取消，以及 Pi faux Provider 驱动的 Main Agent -> `spawn_agent` -> Sub Agent 与 Planner -> RunScheduler -> 真实 Manager 端到端闭环；不会访问外部模型服务。
+当前测试不需要 API Key。它们验证 Profile、权限裁剪、路径边界、分层 Registry、持久 Profile 审批、主 Agent 编排工具、Manager 事件桥、JSONL 事件持久化和脱敏、任务状态/结果恢复、超时/最大回合/并发限制、token/cost 用量统计和成本上限、真实 Pi Session 创建、Task DAG 校验与拓扑排序、Planner 输出解析校验、RunScheduler 依赖调度/失败传播/取消、模型配置中心持久化/密钥边界/角色解析，以及 Pi faux Provider 驱动的 Main Agent -> `spawn_agent` -> Sub Agent、Planner -> RunScheduler -> 真实 Manager、配置中心驱动新 Session 的端到端闭环；不会访问外部模型服务。
 
 ## 当前入口
 
@@ -108,7 +108,40 @@ const gateway = new ModelGateway(modelRuntime, {
 const runtime = createMultiAgentRuntime({ modelGateway: gateway });
 ```
 
-API Key 不进入 Agent Profile、路由配置、任务结果或普通日志。`AgentResult.usage` 只包含 token 数和美元成本数值；Profile 的 `limits.maxCostUsd` 超限时，Pi Session 会被中止并返回 `agent_cost_limit_exceeded`。当前尚未完成外部 Provider Gateway、模型配置中心和真实 API Key 管理服务；这些仍由宿主凭据解析器和 Pi `ModelRuntime` 承担。
+API Key 不进入 Agent Profile、路由配置、任务结果或普通日志。`AgentResult.usage` 只包含 token 数和美元成本数值；Profile 的 `limits.maxCostUsd` 超限时，Pi Session 会被中止并返回 `agent_cost_limit_exceeded`。
+
+### 模型配置中心
+
+Provider、Model Profile 和角色绑定可以通过 `ModelConfigService` 持久化管理（JSON 存储），新任务自动使用最新配置：
+
+```ts
+const runtime = await createMultiAgentRuntimeAsync({
+  modelRuntime,
+  modelConfigStore: new FileModelConfigStore(".multi-agent-dev/models"),
+  secrets: mySecretStore, // 宿主 Secret 管理，Provider 只存 apiKeySecretRef
+});
+
+// 配置 Provider 与 Model Profile
+await runtime.modelConfig!.upsertProvider({
+  id: "deepseek",
+  name: "DeepSeek",
+  kind: "openai-compatible",
+  apiKeySecretRef: "DEEPSEEK_API_KEY",
+  enabled: true,
+});
+await runtime.modelConfig!.upsertModelProfile({
+  name: "coding-balanced",
+  providerId: "deepseek",
+  modelName: "deepseek-chat",
+  reasoningEffort: "medium",
+  enabled: true,
+});
+
+// 切换角色模型：新 Run/新 Session 立即生效
+await runtime.modelConfig!.setRoleBinding("backend", "coding-strong");
+```
+
+密钥边界：Provider 记录只允许 `apiKeySecretRef`（明文 apiKey 会被拒绝）；真实凭据由宿主 `SecretStore` 在 Session 创建前注入 Pi `ModelRuntime`；配置读取不返回明文。运行中的 Session 在下一轮由宿主用新 Gateway 重建（Pi 不支持安全热替换模型）。
 
 ## 持久 Profile
 
@@ -281,6 +314,8 @@ src/
 ├── profile-store.ts         # 项目/用户级持久 Profile 和版本快照
 ├── profile-service.ts       # 宿主批准后的持久 Profile 组合服务
 ├── model-gateway.ts         # 模型路由和宿主凭据边界
+├── model-config.ts          # Provider/ModelProfile/RoleBinding 契约与 JSON 存储
+├── model-config-service.ts  # 模型配置中心：CRUD、role 解析、aliases、SecretStore 边界
 ├── factory.ts               # Profile 创建和能力裁剪
 ├── builtins.ts              # researcher/coder/tester/reviewer
 ├── pi-adapter.ts            # Pi 0.83 AgentSession Adapter

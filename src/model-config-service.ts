@@ -84,6 +84,8 @@ export class ModelConfigService {
     for (const binding of snapshot.roleBindings) {
       this.roleBindings.set(binding.role, binding);
     }
+    // Seed default profiles that the store does not persist yet.
+    this.seedModelProfiles();
     return this.snapshot();
   }
 

@@ -34,6 +34,8 @@ import {
 import type { ControlPlaneExecutionDefaults } from "./control-plane.js";
 import { PlannerService } from "./planner.js";
 import { RunScheduler } from "./run-scheduler.js";
+import { FileModelConfigStore, type ModelProfileConfig } from "./model-config.js";
+import { ModelConfigService, type SecretStore } from "./model-config-service.js";
 
 export interface MultiAgentRuntimeOptions {
   policy?: FactoryPolicy;
@@ -47,6 +49,12 @@ export interface MultiAgentRuntimeOptions {
   profileStore?: FileProfileStore;
   eventStore?: AgentEventStore;
   taskStore?: AgentTaskStore;
+  /** JSON store for the model configuration center. */
+  modelConfigStore?: FileModelConfigStore;
+  /** Host secret vault referenced by provider apiKeySecretRef. */
+  secrets?: SecretStore;
+  /** Default model profiles seeded when the store has none. */
+  defaultModelProfiles?: ModelProfileConfig[];
 }
 
 export interface RuntimeRunSchedulerOptions {
@@ -78,6 +86,7 @@ export interface MultiAgentRuntime {
   readonly persistentProfiles?: PersistentProfileService;
   readonly eventStore?: AgentEventStore;
   readonly taskStore?: AgentTaskStore;
+  readonly modelConfig?: ModelConfigService;
   readonly controlPlane: AgentControlPlane;
   createControlPlaneHttpServer(options?: ControlPlaneHttpServerOptions): ControlPlaneHttpServer;
   createControlPlaneWebSocketServer(options?: ControlPlaneWebSocketServerOptions): ControlPlaneWebSocketServer;
@@ -106,6 +115,18 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
   for (const profile of createBuiltInProfiles(now())) {
     registry.registerBuiltIn(profile);
   }
+
+  // Model configuration center: persists Providers / Model Profiles / Role
+  // Bindings and drives aliases for new Sessions ("new tasks use new config").
+  const modelConfig = options.modelConfigStore
+    ? new ModelConfigService({
+      store: options.modelConfigStore,
+      ...(options.secrets ? { secrets: options.secrets } : {}),
+      ...(options.defaultModelProfiles ? { defaultModelProfiles: options.defaultModelProfiles } : {}),
+      now,
+    })
+    : undefined;
+  modelConfig?.seedModelProfiles();
 
   const factory = new AgentFactory(registry, policy, now);
   const sessionFactory = new PiSessionFactory();
@@ -143,18 +164,28 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
   const persistentProfiles = options.profileStore
     ? new PersistentProfileService(factory, registry, options.profileStore)
     : undefined;
-  const createMainAgent = (mainOptions: MainAgentOptions) => mainAgentFactory.create({
-    ...mainOptions,
-    ...(modelRuntime ? { modelRuntime } : {}),
-    ...(options.modelGateway ? { modelGateway: options.modelGateway } : {}),
-    ...(Object.keys(modelAliases).length > 0 ? { modelAliases } : {}),
-  });
+  const createMainAgent = (mainOptions: MainAgentOptions) => {
+    const gateway = mainOptions.modelGateway
+      ?? options.modelGateway
+      ?? (modelConfig && modelRuntime ? gatewayFromConfig(modelConfig, modelRuntime) : undefined);
+    const aliases = mainOptions.modelAliases
+      ?? (gateway ? gateway.aliases : modelAliases);
+    return mainAgentFactory.create({
+      ...mainOptions,
+      ...(modelRuntime ? { modelRuntime } : {}),
+      ...(gateway ? { modelGateway: gateway } : {}),
+      ...(Object.keys(aliases).length > 0 ? { modelAliases: aliases } : {}),
+    });
+  };
 
   const createRunScheduler = (schedulerOptions: RuntimeRunSchedulerOptions): RunScheduler => {
     const agentDir = schedulerOptions.agentDir ?? `${schedulerOptions.workspace}/.pi`;
     const schedulerModelRuntime = schedulerOptions.modelRuntime ?? modelRuntime;
-    const schedulerModelAliases = schedulerOptions.modelAliases ?? modelAliases;
-    const schedulerModelGateway = schedulerOptions.modelGateway ?? options.modelGateway;
+    const schedulerModelGateway = schedulerOptions.modelGateway
+      ?? options.modelGateway
+      ?? (modelConfig && modelRuntime ? gatewayFromConfig(modelConfig, modelRuntime) : undefined);
+    const schedulerModelAliases = schedulerOptions.modelAliases
+      ?? (schedulerModelGateway ? schedulerModelGateway.aliases : modelAliases);
     const planner = new PlannerService(sessionFactory, {
       cwd: schedulerOptions.workspace,
       agentDir,
@@ -189,6 +220,7 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
     ...(options.profileStore ? { profileStore: options.profileStore } : {}),
     ...(options.eventStore ? { eventStore: options.eventStore } : {}),
     ...(options.taskStore ? { taskStore: options.taskStore } : {}),
+    ...(modelConfig ? { modelConfig } : {}),
     controlPlane,
     createControlPlaneHttpServer,
     createControlPlaneWebSocketServer,
@@ -211,5 +243,23 @@ export async function createMultiAgentRuntimeAsync(
   if (options.profileStore) {
     await options.profileStore.loadInto(runtime.registry);
   }
+  if (options.modelConfigStore && runtime.modelConfig) {
+    // Load persisted Providers / Model Profiles / Role Bindings and re-seed
+    // any missing defaults. Config changes take effect for new sessions.
+    await runtime.modelConfig.load();
+  }
   return runtime;
+}
+
+/** Build a ModelGateway from the config center's current aliases + secrets. */
+function gatewayFromConfig(
+  config: ModelConfigService,
+  modelRuntime: ModelRuntime,
+): ModelGateway | undefined {
+  const aliases = config.buildAliases();
+  if (Object.keys(aliases).length === 0) return undefined;
+  return new ModelGateway(modelRuntime, {
+    aliases,
+    credentials: config.createCredentialResolver(),
+  });
 }
