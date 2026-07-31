@@ -59,6 +59,18 @@ WORKER_TOKEN=dev-token node examples/worker-demo.mjs --real
 
 Worker 通过 `WORKER_TOKEN` 鉴权握手，`WORKER_WORKSPACE` / `WORKER_AGENT_DIR` 控制工作区与持久化位置。这是企划书「Control Plane → Worker Manager → 独立 Node 进程 → Pi Agent Core」的落地示例；分布式队列调度与容器隔离是后续阶段。
 
+### 开发服务器（供应商管理入口）
+
+`npm run dev-server` 启动一个开箱即用的开发服务器（默认 `127.0.0.1:8787`，数据目录 `.multi-agent-dev/`）：
+
+```bash
+npm run dev-server            # 或 node examples/dev-server.mjs --port 8787 --data .multi-agent-dev
+```
+
+- 浏览器打开 **http://127.0.0.1:8787/ui/vendors** → 填写供应商名称 / API 地址 / API Key / 模型名称 / 上下文，一键添加供应商；
+- API Key 存入 `<data>/secrets.json`（本地文件 SecretStore，演示用；生产替换为宿主 SecretStore），Provider 配置只保留 `apiKeySecretRef` 引用；
+- 同时提供模型配置中心、Run 调度和 Control Plane 的完整 REST 接口。
+
 ## 当前入口
 
 ```ts

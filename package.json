@@ -7,7 +7,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test dist/test/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "e2e": "node examples/e2e-real-provider.mjs"
+    "e2e": "node examples/e2e-real-provider.mjs",
+    "dev-server": "node examples/dev-server.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
