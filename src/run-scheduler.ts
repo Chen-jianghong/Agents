@@ -14,6 +14,9 @@ import type { AgentProfile, AgentResult, AgentTask, CreateAgentRequest } from ".
 import { AgentFactory } from "./factory.js";
 import type { AgentRunOptions, BackgroundAgentRun } from "./manager.js";
 import type { AgentEventStore } from "./event-store.js";
+import type { ModelGateway } from "./model-gateway.js";
+import type { ModelAliases } from "./model-runtime.js";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { PlanPlanner } from "./planner.js";
 import type {
   PlanTask,
@@ -67,6 +70,10 @@ export interface RunSchedulerOptions {
   manager: RunTaskManager;
   factory: AgentFactory;
   registry: ProfileRegistry;
+  /** Model routing for task Sessions; required to run real Agents. */
+  modelRuntime?: ModelRuntime;
+  modelAliases?: ModelAliases;
+  modelGateway?: ModelGateway;
   maxParallel?: number;
   now?: () => string;
   eventStore?: AgentEventStore;
@@ -359,6 +366,9 @@ export class RunScheduler {
     const runOptions: AgentRunOptions = {
       cwd: run.workspace,
       agentDir: run.agentDir,
+      ...(this.options.modelRuntime ? { modelRuntime: this.options.modelRuntime } : {}),
+      ...(this.options.modelAliases ? { modelAliases: this.options.modelAliases } : {}),
+      ...(this.options.modelGateway ? { modelGateway: this.options.modelGateway } : {}),
     };
     const background = this.options.manager.runBackground(profile, agentTask, runOptions);
     task.agentTaskId = background.agentTaskId;
