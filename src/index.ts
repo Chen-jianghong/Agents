@@ -19,6 +19,7 @@ export * from "./control-plane-http.js";
 export * from "./control-plane-ws.js";
 export * from "./control-plane-worker-rpc.js";
 export * from "./worker-process.js";
+export * from "./rest-api.js";
 export * from "./profile-store.js";
 export * from "./profile-service.js";
 export * from "./plan-contracts.js";

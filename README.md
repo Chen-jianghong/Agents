@@ -347,6 +347,39 @@ await worker.stop();
 
 Supervisor 会强制使用非 shell 子进程，支持启动/停止超时，并在 Worker 异常退出时拒绝未完成的请求。
 
+### REST API
+
+`createRestApiServer()` 提供面向客户端的 REST 接口（企划书 Phase 5）。它是 Control Plane 的薄封装：每个路由翻译成 v1 命令，复用同一套校验、workspace 边界和宿主执行配置。成功响应直接返回数据，失败返回 `{ error: { code, message } }` + 对应 HTTP 状态码：
+
+```ts
+const server = runtime.createRestApiServer({
+  authorize: (request) => request.headers["x-control-token"] === process.env.CONTROL_TOKEN,
+});
+const address = await server.start(); // 默认只绑定 127.0.0.1
+```
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/health` | 健康检查 |
+| GET | `/api/profiles` | 列出全部 Agent Profile |
+| GET | `/api/runs` | 列出全部 Run |
+| POST | `/api/runs` | 创建 Run `{ goal, workspace?, maxParallel?, plannerModelProfile? }`（`workspace` 缺省用宿主工作区） |
+| GET | `/api/runs/:runId` | Run 快照（不存在返回 404） |
+| GET | `/api/runs/:runId/graph` | Run 的 TaskDAG |
+| GET | `/api/runs/:runId/tasks` | Run 的任务列表 |
+| POST | `/api/runs/:runId/start` | 启动 Run（异步，立即返回 planning 快照） |
+| POST | `/api/runs/:runId/cancel` | 取消 Run |
+| GET | `/api/runs/:runId/events` | SSE 事件流（按 Run 过滤，事件用 `data:` JSON 帧推送） |
+| GET | `/api/agents` | 列出 Agent 任务（支持 `?status=&profileId=&runId=&parentTaskId=` 过滤） |
+| GET | `/api/agents/tasks` | 同上 |
+| GET | `/api/agents/tasks/:agentTaskId` | 单个 Agent 任务记录 |
+| POST | `/api/agents/tasks/:agentTaskId/retry` | 重试失败/取消/超时任务 |
+| GET | `/api/agents/results/:agentTaskId` | Agent 任务结果 |
+| POST | `/api/agents/run` | 提交后台 Agent 任务 `{ profileId, task }` |
+| POST | `/api/agents/:agentId/cancel` | 取消 Agent |
+
+错误码映射：`invalid_request` 系 → 400，`*_not_found` → 404，`*_mismatch` / `agent_depth_limit` → 422，`*_unavailable` → 503，鉴权失败 → 401。
+
 ## 目录
 
 ```text
@@ -374,6 +407,7 @@ src/
 ├── control-plane.ts         # v1 控制面 DTO、命令分发和事件订阅
 ├── control-plane-http.ts    # HTTP JSON/SSE transport 和鉴权钩子
 ├── control-plane-ws.ts      # WebSocket transport、事件推送和背压限制
+├── rest-api.ts              # REST API（Phase 5）：Run/Task/Agent 端点、SSE 事件流
 ├── control-plane-worker-rpc.ts # Worker JSONL RPC、鉴权和帧边界
 ├── worker-process.ts         # Worker 子进程启动、握手、停止和异常退出管理
 ├── orchestration-tools.ts   # 主 Agent 编排工具

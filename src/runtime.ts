@@ -31,6 +31,10 @@ import {
   ControlPlaneWorkerProcess,
   type ControlPlaneWorkerProcessOptions,
 } from "./worker-process.js";
+import {
+  MultiAgentRestApiServer,
+  type MultiAgentRestApiServerOptions,
+} from "./rest-api.js";
 import type { ControlPlaneExecutionDefaults } from "./control-plane.js";
 import { PlannerService } from "./planner.js";
 import { RunScheduler } from "./run-scheduler.js";
@@ -113,6 +117,8 @@ export interface MultiAgentRuntime {
     options?: ControlPlaneWorkerRpcServerOptions,
   ): ControlPlaneWorkerRpcServer;
   createControlPlaneWorkerProcess(options: ControlPlaneWorkerProcessOptions): ControlPlaneWorkerProcess;
+  /** REST API over the Control Plane (project plan Phase 5). */
+  createRestApiServer(options?: MultiAgentRestApiServerOptions): MultiAgentRestApiServer;
   createMainAgent(options: MainAgentOptions): Promise<ManagedAgent>;
   /** Build a RunScheduler wired to this runtime's manager/factory/registry. */
   createRunScheduler(options: RuntimeRunSchedulerOptions): RunScheduler;
@@ -229,6 +235,13 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
   ) => new ControlPlaneWorkerRpcServer(controlPlane, input, output, rpcOptions);
   const createControlPlaneWorkerProcess = (processOptions: ControlPlaneWorkerProcessOptions) =>
     new ControlPlaneWorkerProcess(processOptions);
+  const createRestApiServer = (apiOptions: MultiAgentRestApiServerOptions = {}) =>
+    new MultiAgentRestApiServer(controlPlane, {
+      ...apiOptions,
+      ...(apiOptions.defaultWorkspace === undefined && controlPlaneExecution
+        ? { defaultWorkspace: controlPlaneExecution.cwd }
+        : {}),
+    });
   const mainAgentFactory = new MainAgentFactory(sessionFactory, factory, registry, manager);
   const persistentProfiles = options.profileStore
     ? new PersistentProfileService(factory, registry, options.profileStore)
@@ -270,6 +283,7 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
     createControlPlaneWebSocketServer,
     createControlPlaneWorkerRpcServer,
     createControlPlaneWorkerProcess,
+    createRestApiServer,
     ...(persistentProfiles ? { persistentProfiles } : {}),
     createMainAgent,
     createRunScheduler,
