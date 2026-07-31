@@ -6,3 +6,4 @@ dist/
 .reasonix/
 *.7z
 .e2e-workspace/
+.pi-worker/

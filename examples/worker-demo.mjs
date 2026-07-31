@@ -16,7 +16,8 @@ import { createMultiAgentRuntime } from "../dist/src/index.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const entry = join(here, "worker-entry.mjs");
 const real = process.argv.includes("--real");
-const workspace = process.env.WORKER_WORKSPACE ?? process.cwd();
+const workspace = process.env.WORKER_WORKSPACE
+  ?? join(process.cwd(), ".e2e-workspace");
 
 const runtime = createMultiAgentRuntime();
 const worker = runtime.createControlPlaneWorkerProcess({
