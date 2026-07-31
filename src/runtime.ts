@@ -32,6 +32,8 @@ import {
   type ControlPlaneWorkerProcessOptions,
 } from "./worker-process.js";
 import type { ControlPlaneExecutionDefaults } from "./control-plane.js";
+import { PlannerService } from "./planner.js";
+import { RunScheduler } from "./run-scheduler.js";
 
 export interface MultiAgentRuntimeOptions {
   policy?: FactoryPolicy;
@@ -45,6 +47,21 @@ export interface MultiAgentRuntimeOptions {
   profileStore?: FileProfileStore;
   eventStore?: AgentEventStore;
   taskStore?: AgentTaskStore;
+}
+
+export interface RuntimeRunSchedulerOptions {
+  /** Project workspace the Run executes in. */
+  workspace: string;
+  /** Pi agent directory; defaults to <workspace>/.pi. */
+  agentDir?: string;
+  /** Model profile name for the Planner session. */
+  plannerModelProfile?: string;
+  /** Default parallelism bound for Runs. */
+  maxParallel?: number;
+  modelRuntime?: ModelRuntime;
+  modelAliases?: ModelAliases;
+  modelGateway?: ModelGateway;
+  eventStore?: AgentEventStore;
 }
 
 export interface MultiAgentRuntime {
@@ -71,6 +88,8 @@ export interface MultiAgentRuntime {
   ): ControlPlaneWorkerRpcServer;
   createControlPlaneWorkerProcess(options: ControlPlaneWorkerProcessOptions): ControlPlaneWorkerProcess;
   createMainAgent(options: MainAgentOptions): Promise<ManagedAgent>;
+  /** Build a RunScheduler wired to this runtime's manager/factory/registry. */
+  createRunScheduler(options: RuntimeRunSchedulerOptions): RunScheduler;
   resolveModelName(model?: Model<any>): string;
 }
 
@@ -131,6 +150,32 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
     ...(Object.keys(modelAliases).length > 0 ? { modelAliases } : {}),
   });
 
+  const createRunScheduler = (schedulerOptions: RuntimeRunSchedulerOptions): RunScheduler => {
+    const agentDir = schedulerOptions.agentDir ?? `${schedulerOptions.workspace}/.pi`;
+    const schedulerModelRuntime = schedulerOptions.modelRuntime ?? modelRuntime;
+    const schedulerModelAliases = schedulerOptions.modelAliases ?? modelAliases;
+    const schedulerModelGateway = schedulerOptions.modelGateway ?? options.modelGateway;
+    const planner = new PlannerService(sessionFactory, {
+      cwd: schedulerOptions.workspace,
+      agentDir,
+      ...(schedulerOptions.plannerModelProfile ? { modelProfile: schedulerOptions.plannerModelProfile } : {}),
+      ...(schedulerModelRuntime ? { modelRuntime: schedulerModelRuntime } : {}),
+      ...(Object.keys(schedulerModelAliases).length > 0 ? { modelAliases: schedulerModelAliases } : {}),
+      ...(schedulerModelGateway ? { modelGateway: schedulerModelGateway } : {}),
+    });
+    return new RunScheduler({
+      planner,
+      manager,
+      factory,
+      registry,
+      ...(schedulerModelRuntime ? { modelRuntime: schedulerModelRuntime } : {}),
+      ...(Object.keys(schedulerModelAliases).length > 0 ? { modelAliases: schedulerModelAliases } : {}),
+      ...(schedulerModelGateway ? { modelGateway: schedulerModelGateway } : {}),
+      ...(schedulerOptions.maxParallel !== undefined ? { maxParallel: schedulerOptions.maxParallel } : {}),
+      ...(schedulerOptions.eventStore ?? options.eventStore ? { eventStore: schedulerOptions.eventStore ?? options.eventStore } : {}),
+    });
+  };
+
   return {
     registry,
     factory,
@@ -151,6 +196,7 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
     createControlPlaneWorkerProcess,
     ...(persistentProfiles ? { persistentProfiles } : {}),
     createMainAgent,
+    createRunScheduler,
     resolveModelName: (model) => model?.id ?? policy.defaultModel,
   };
 }

@@ -7,7 +7,6 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createMultiAgentRuntime, PiSessionFactory } from "../src/index.js";
 import { PlannerService } from "../src/planner.js";
-import { RunScheduler } from "../src/run-scheduler.js";
 import type { TaskDAG } from "../src/plan-contracts.js";
 
 const VALID_DAG: TaskDAG = {
@@ -118,19 +117,9 @@ describe("Phase B integration (real Pi loop with faux provider)", () => {
       ]);
 
       const runtime = createMultiAgentRuntime({ modelRuntime, modelAliases: aliases });
-      const planner = new PlannerService(runtime.sessionFactory, {
-        cwd: process.cwd(),
+      const scheduler = runtime.createRunScheduler({
+        workspace: process.cwd(),
         agentDir: join(root, "pi"),
-        modelRuntime,
-        modelAliases: aliases,
-      });
-      const scheduler = new RunScheduler({
-        planner,
-        manager: runtime.manager,
-        factory: runtime.factory,
-        registry: runtime.registry,
-        modelRuntime,
-        modelAliases: aliases,
         maxParallel: 1,
       });
 

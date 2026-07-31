@@ -25,7 +25,7 @@ npm run typecheck
 npm test
 ```
 
-当前测试不需要 API Key。它们验证 Profile、权限裁剪、路径边界、分层 Registry、持久 Profile 审批、主 Agent 编排工具、Manager 事件桥、JSONL 事件持久化和脱敏、任务状态/结果恢复、超时/最大回合/并发限制、token/cost 用量统计和成本上限、真实 Pi Session 创建，以及 Pi faux Provider 驱动的 Main Agent -> `spawn_agent` -> Sub Agent 真实回合；不会访问外部模型服务。
+当前测试不需要 API Key。它们验证 Profile、权限裁剪、路径边界、分层 Registry、持久 Profile 审批、主 Agent 编排工具、Manager 事件桥、JSONL 事件持久化和脱敏、任务状态/结果恢复、超时/最大回合/并发限制、token/cost 用量统计和成本上限、真实 Pi Session 创建、Task DAG 校验与拓扑排序、Planner 输出解析校验、RunScheduler 依赖调度/失败传播/取消，以及 Pi faux Provider 驱动的 Main Agent -> `spawn_agent` -> Sub Agent 与 Planner -> RunScheduler -> 真实 Manager 端到端闭环；不会访问外部模型服务。
 
 ## 当前入口
 
@@ -45,6 +45,35 @@ const mainAgent = await runtime.createMainAgent({
 // 业务层后续通过 mainAgent.session.prompt(...) 接收用户请求。
 // Main Agent 的编排工具已经由 factory 挂载到这个 Pi Session。
 ```
+
+### Planner 与 Run 调度
+
+自然语言需求经过 Planner 转成结构化 TaskDAG，再由 RunScheduler 按依赖和并发上限执行：
+
+```ts
+const scheduler = runtime.createRunScheduler({
+  workspace: process.cwd(),
+  agentDir: `${process.cwd()}/.pi`,
+  maxParallel: 4,
+});
+
+// 1. 创建 Run（status: created）
+const run = scheduler.createRun({
+  goal: "为后台增加团队成员管理功能",
+  workspace: process.cwd(),
+});
+
+// 2. 规划 + 调度（Planner 生成 DAG → 校验 → 并行执行）
+await scheduler.startRun(run.runId);
+
+// 3. 订阅 Run/Task 事件（run.created / task.running / run.succeeded ...）
+scheduler.subscribe((event) => console.log(event.type, event.payload));
+
+// 4. 等待终态
+const result = await scheduler.waitForRun(run.runId);
+```
+
+Planner 输出必须符合 TaskDAG Schema（id 唯一、依赖无环、writePaths 不重叠、必须有验收标准），非法输出会让 Run 进入 `planning_failed`，不会启动任何 Worker。任务失败或取消时，依赖它的下游任务被阻塞（cancelled），无关任务继续执行。
 
 模型接入分为两种方式：
 
@@ -242,6 +271,10 @@ Supervisor 会强制使用非 shell 子进程，支持启动/停止超时，并�
 ```text
 src/
 ├── contracts.ts             # AgentProfile、Task、Result、Event
+├── plan-contracts.ts        # Run/Task 状态机、PlanTask/TaskDAG、校验/规划结果契约
+├── dag.ts                   # Task DAG 校验、拓扑排序、就绪/阻塞计算
+├── planner.ts               # Planner Profile、prompt 构建、DAG JSON 解析与校验
+├── run-scheduler.ts         # Run 生命周期、依赖调度、并发、失败传播、取消
 ├── profile-validator.ts     # Profile/请求校验
 ├── tool-policy.ts           # 工具和路径权限
 ├── registry.ts              # Profile Registry
@@ -267,7 +300,7 @@ src/
 
 下一阶段接入顺序：
 
-1. 外部 Provider Gateway、模型配置和 API Key 管理服务；
-2. Control Plane 调度和客户端展示；
+1. 外部 Provider Gateway、模型配置中心和真实 API Key 管理服务；
+2. Control Plane 调度（Run/DAG 命令）和客户端展示；
 3. Worker 进程的分布式队列调度和容器隔离；
 4. 配额、成本汇总和更细的重试策略。
