@@ -202,6 +202,54 @@ const response = await runtime.controlPlane.handle({
 
 当前协议支持 Profile/Task/Result 查询、Agent 取消和失败任务重试；`retry_agent` 只允许重试失败、取消或超时的任务，已完成任务不会被覆盖。协议不会暴露 Pi Session、ModelRuntime 或凭据对象。
 
+### Run/DAG 命令
+
+配置 `controlPlaneScheduler` 后，Control Plane 会挂载一个共享 RunScheduler，把「自然语言需求 → Planner 拆解 → DAG 调度执行」的完整链路暴露到协议层。`create_run` 只接受与宿主执行工作区一致的 `workspace`，模型路由与 Planner Session 全部由宿主配置，不从请求中接收：
+
+```ts
+const runtime = createMultiAgentRuntime({
+  controlPlaneExecution: {
+    cwd: process.cwd(),
+    agentDir: `${process.cwd()}/.pi`,
+  },
+  controlPlaneScheduler: { maxParallel: 4 }, // 挂载 RunScheduler
+});
+
+// 1. 创建 Run（status: created）
+const created = await runtime.controlPlane.handle({
+  version: "v1", requestId: "create-1", type: "create_run",
+  goal: "为后台增加团队成员管理功能",
+  workspace: process.cwd(),
+  maxParallel: 2, // 可选，覆盖宿主默认值
+});
+
+// 2. 启动 Run（立即返回 planning 快照；规划与调度在后台进行）
+const started = await runtime.controlPlane.handle({
+  version: "v1", requestId: "start-1", type: "start_run",
+  runId: created.data.runId,
+});
+
+// 3. 通过事件订阅或轮询 get_run 跟踪进度
+runtime.controlPlane.subscribe((event) => console.log(event.type, event.payload));
+const snapshot = await runtime.controlPlane.handle({
+  version: "v1", requestId: "get-1", type: "get_run", runId: created.data.runId,
+});
+
+// 4. 取消或列出
+await runtime.controlPlane.handle({
+  version: "v1", requestId: "cancel-1", type: "cancel_run", runId: created.data.runId,
+});
+const runs = await runtime.controlPlane.handle({
+  version: "v1", requestId: "list-1", type: "list_runs",
+});
+```
+
+协议行为：
+- `start_run` 异步启动：立即返回 `planning` 快照，后续状态通过 `run.*` / `task.*` 事件推送或 `get_run` 轮询获取；对已启动或已终态的 Run 幂等返回当前快照，不会重复启动；
+- 规划期间取消的 Run 在 Planner 返回后直接终态化，**不会调度任何任务**；
+- 未配置 `controlPlaneScheduler` 时 Run 命令返回 `run_submission_unavailable` / `run_scheduler_unavailable`；`workspace` 与宿主工作区不一致返回 `run_workspace_mismatch`；
+- 共享实例通过 `runtime.controlPlaneScheduler` 暴露，宿主可以用 `waitForRun(runId)` 等待终态。
+
 Task Store 会保存提交时绑定的 Profile 快照，以及不含 ModelRuntime、ModelGateway、凭据或 Workspace Provider 实例的安全执行快照。Manager 重启后可以通过 `retry_agent` 恢复失败、取消、超时或孤儿运行任务，但跨进程恢复必须由宿主注入 `taskRecovery.resolveExecution`；宿主需要重新提供 `cwd`、`agentDir`、模型运行时、模型路由、凭据边界和工作区 Provider。没有恢复解析器时，Runtime 会返回结构化的 `agent_retry_execution_unavailable`，不会猜测使用当前同名 Profile 或绕过原有工作区隔离。
 
 如果需要从 UI、Worker 或其他宿主提交后台 Agent 任务，必须由宿主显式配置执行工作区和 Agent 目录。提交时只传 Profile ID 与序列化任务，Runtime 会先按任务边界绑定 Profile，再调用 `PiAgentManager.runBackground`：

@@ -3,3 +3,5 @@ dist/
 .pi/
 .pi-test/
 *.log
+.reasonix/
+*.7z

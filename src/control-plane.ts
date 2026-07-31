@@ -8,6 +8,8 @@ import type { ModelAliases } from "./model-runtime.js";
 import type { ModelGateway } from "./model-gateway.js";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentWorkspaceProvider } from "./workspace.js";
+import type { RunSnapshot } from "./plan-contracts.js";
+import type { RunScheduler } from "./run-scheduler.js";
 
 export const CONTROL_PLANE_VERSION = "v1" as const;
 
@@ -18,7 +20,17 @@ export type ControlPlaneRequest =
   | ControlPlaneRequestBase<"get_result"> & { agentTaskId: string }
   | ControlPlaneRequestBase<"run_agent"> & { profileId: string; task: AgentTask }
   | ControlPlaneRequestBase<"retry_agent"> & { agentTaskId: string }
-  | ControlPlaneRequestBase<"cancel_agent"> & { agentId: string };
+  | ControlPlaneRequestBase<"cancel_agent"> & { agentId: string }
+  | ControlPlaneRequestBase<"create_run"> & {
+    goal: string;
+    workspace: string;
+    maxParallel?: number;
+    plannerModelProfile?: string;
+  }
+  | ControlPlaneRequestBase<"start_run"> & { runId: string }
+  | ControlPlaneRequestBase<"cancel_run"> & { runId: string }
+  | ControlPlaneRequestBase<"get_run"> & { runId: string }
+  | ControlPlaneRequestBase<"list_runs">;
 
 interface ControlPlaneRequestBase<T extends string> {
   version: typeof CONTROL_PLANE_VERSION;
@@ -45,6 +57,10 @@ export type ControlPlaneResponse =
     status: "queued" | "running";
   }>
   | ControlPlaneSuccess<{ agentId: string; status: "cancel_requested" }>
+  | ControlPlaneSuccess<RunSnapshot>
+  | ControlPlaneSuccess<RunSnapshot | null>
+  | ControlPlaneSuccess<RunSnapshot[]>
+  | ControlPlaneSuccess<{ runId: string; status: "cancel_requested" }>
   | ControlPlaneFailure;
 
 export interface ControlPlaneExecutionDefaults {
@@ -61,6 +77,8 @@ export interface ControlPlaneExecutionDefaults {
 export interface AgentControlPlaneOptions {
   factory?: AgentFactory;
   execution?: ControlPlaneExecutionDefaults;
+  /** Optional RunScheduler exposing Run/DAG commands (create_run / start_run / ...). */
+  runScheduler?: RunScheduler;
 }
 
 export interface ControlPlaneSuccess<T> {
@@ -124,6 +142,16 @@ export class AgentControlPlane {
             agentId: request.agentId,
             status: "cancel_requested" as const,
           });
+        case "create_run":
+          return this.createRun(request);
+        case "start_run":
+          return this.startRun(request);
+        case "cancel_run":
+          return await this.cancelRun(request);
+        case "get_run":
+          return success(request.requestId, this.getRun(request.runId));
+        case "list_runs":
+          return success(request.requestId, this.listRuns());
       }
     } catch (error) {
       const protocolError = error instanceof ControlPlaneProtocolError
@@ -134,12 +162,103 @@ export class AgentControlPlane {
   }
 
   subscribe(listener: (event: AgentEvent) => void): () => void {
-    return this.manager.subscribe(listener);
+    const disposers: Array<() => void> = [this.manager.subscribe(listener)];
+    if (this.options.runScheduler) {
+      disposers.push(this.options.runScheduler.subscribe(listener));
+    }
+    return () => {
+      for (const dispose of disposers) dispose();
+    };
   }
 
   async flush(): Promise<void> {
     await this.manager.flushEvents();
     await this.manager.flushTasks();
+  }
+
+  private createRun(
+    request: Extract<ControlPlaneRequest, { type: "create_run" }>,
+  ): ControlPlaneSuccess<RunSnapshot> {
+    const scheduler = this.requireRunScheduler("run_submission_unavailable");
+    if (!this.options.execution) {
+      throw new ControlPlaneProtocolError(
+        "run_submission_unavailable",
+        "Control Plane Run submission is not configured",
+      );
+    }
+    if (resolve(request.workspace) !== resolve(this.options.execution.cwd)) {
+      throw new ControlPlaneProtocolError(
+        "run_workspace_mismatch",
+        "Run workspace must match the configured Control Plane workspace",
+      );
+    }
+    const snapshot = scheduler.createRun({
+      goal: request.goal,
+      workspace: request.workspace,
+      ...(request.maxParallel !== undefined ? { maxParallel: request.maxParallel } : {}),
+      ...(request.plannerModelProfile !== undefined
+        ? { plannerModelProfile: request.plannerModelProfile }
+        : {}),
+    });
+    return success(request.requestId, snapshot);
+  }
+
+  private startRun(
+    request: Extract<ControlPlaneRequest, { type: "start_run" }>,
+  ): ControlPlaneSuccess<RunSnapshot> {
+    const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
+    const run = scheduler.getRun(request.runId);
+    if (!run) {
+      throw new ControlPlaneProtocolError("run_not_found", `Run ${request.runId} was not found`);
+    }
+    if (run.status !== "created") {
+      // Idempotent: an already-started Run returns its current snapshot.
+      return success(request.requestId, run);
+    }
+    // Planning is asynchronous: the client observes progress through
+    // Control Plane events and get_run snapshots.
+    void scheduler.startRun(request.runId).catch((error: unknown) => {
+      // startRun never rejects after the planner try/catch, but a
+      // programming error must not surface as an unhandled rejection.
+      scheduler.getRun(request.runId);
+      void error;
+    });
+    return success(request.requestId, scheduler.getRun(request.runId)!);
+  }
+
+  private async cancelRun(
+    request: Extract<ControlPlaneRequest, { type: "cancel_run" }>,
+  ): Promise<ControlPlaneSuccess<{ runId: string; status: "cancel_requested" }>> {
+    const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
+    const run = scheduler.getRun(request.runId);
+    if (!run) {
+      throw new ControlPlaneProtocolError("run_not_found", `Run ${request.runId} was not found`);
+    }
+    await scheduler.cancelRun(request.runId);
+    return success(request.requestId, {
+      runId: request.runId,
+      status: "cancel_requested" as const,
+    });
+  }
+
+  private getRun(runId: string): RunSnapshot | null {
+    const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
+    return scheduler.getRun(runId) ?? null;
+  }
+
+  private listRuns(): RunSnapshot[] {
+    const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
+    return scheduler.listRuns();
+  }
+
+  private requireRunScheduler(code: string): RunScheduler {
+    if (!this.options.runScheduler) {
+      throw new ControlPlaneProtocolError(
+        code,
+        "Control Plane Run scheduling is not configured",
+      );
+    }
+    return this.options.runScheduler;
   }
 
   private runAgent(
@@ -257,6 +376,29 @@ function parseRequest(input: unknown): ControlPlaneRequest {
       return value as unknown as ControlPlaneRequest;
     case "cancel_agent":
       requireString(value, "agentId");
+      return value as unknown as ControlPlaneRequest;
+    case "create_run":
+      requireString(value, "goal");
+      requireString(value, "workspace");
+      if (
+        value.maxParallel !== undefined
+        && (typeof value.maxParallel !== "number" || !Number.isInteger(value.maxParallel) || value.maxParallel < 1)
+      ) {
+        throw new ControlPlaneProtocolError("invalid_request", "maxParallel must be a positive integer");
+      }
+      if (
+        value.plannerModelProfile !== undefined
+        && (typeof value.plannerModelProfile !== "string" || value.plannerModelProfile.trim().length === 0)
+      ) {
+        throw new ControlPlaneProtocolError("invalid_request", "plannerModelProfile must be a non-empty string");
+      }
+      return value as unknown as ControlPlaneRequest;
+    case "start_run":
+    case "cancel_run":
+    case "get_run":
+      requireString(value, "runId");
+      return value as unknown as ControlPlaneRequest;
+    case "list_runs":
       return value as unknown as ControlPlaneRequest;
     default:
       throw new ControlPlaneProtocolError("unknown_command", `Unknown Control Plane command: ${value.type}`);

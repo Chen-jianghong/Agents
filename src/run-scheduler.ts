@@ -19,6 +19,7 @@ import type { ModelAliases } from "./model-runtime.js";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { PlanPlanner } from "./planner.js";
 import type {
+  PlanOutcome,
   PlanTask,
   RunResult,
   RunSnapshot,
@@ -157,7 +158,22 @@ export class RunScheduler {
     this.touch(run);
     this.emit(run, "run.planning_started", { runId });
 
-    const outcome = await this.options.planner.plan(run.goal);
+    let outcome: PlanOutcome;
+    try {
+      outcome = await this.options.planner.plan(run.goal);
+    } catch (error) {
+      // A throwing Planner must never leave the Run stuck in "planning".
+      run.error = {
+        code: "planning_failed",
+        message: `Planner threw: ${error instanceof Error ? error.message : String(error)}`,
+      };
+      this.emit(run, "run.planning_failed", {
+        runId,
+        reason: { code: "agent_failed", message: run.error.message },
+      });
+      this.finalize(run);
+      return this.snapshot(run);
+    }
     if (outcome.status === "planning_failed") {
       run.error = {
         code: outcome.reason.code === "invalid_dag" ? "planning_invalid_dag" : "planning_failed",
@@ -171,6 +187,21 @@ export class RunScheduler {
     run.dag = outcome.dag;
     for (const planTask of outcome.dag.tasks) {
       run.tasks.set(planTask.id, { planTask, status: "pending" });
+    }
+    if (run.cancellationRequested) {
+      // The Run was cancelled while planning; never schedule the new tasks.
+      for (const task of run.tasks.values()) {
+        task.status = "cancelled";
+        task.error = { code: "run_cancelled", message: "Run was cancelled during planning" };
+        this.emit(
+          run,
+          "task.cancelled",
+          { runId, taskId: task.planTask.id, reason: "run_cancelled" },
+          task.planTask.id,
+        );
+      }
+      this.finalize(run);
+      return this.snapshot(run);
     }
     run.status = "ready";
     this.touch(run);
