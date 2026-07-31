@@ -20,6 +20,7 @@ export type ControlPlaneRequest =
   | ControlPlaneRequestBase<"get_task"> & { agentTaskId: string }
   | ControlPlaneRequestBase<"get_result"> & { agentTaskId: string }
   | ControlPlaneRequestBase<"run_agent"> & { profileId: string; task: AgentTask }
+  | ControlPlaneRequestBase<"register_profile"> & { profile: AgentProfile }
   | ControlPlaneRequestBase<"retry_agent"> & { agentTaskId: string }
   | ControlPlaneRequestBase<"cancel_agent"> & { agentId: string }
   | ControlPlaneRequestBase<"create_run"> & {
@@ -52,6 +53,7 @@ export type ControlPlaneResponse =
     status: "queued" | "running";
     warnings: string[];
   }>
+  | ControlPlaneSuccess<{ profileId: string; version: number }>
   | ControlPlaneSuccess<{
     agentId: string;
     agentTaskId: string;
@@ -139,6 +141,8 @@ export class AgentControlPlane {
           return success(request.requestId, (await this.manager.getResult(request.agentTaskId)) ?? null);
         case "run_agent":
           return await this.runAgent(request);
+        case "register_profile":
+          return this.registerProfile(request);
         case "retry_agent":
           return await this.retryAgent(request);
         case "cancel_agent":
@@ -161,9 +165,10 @@ export class AgentControlPlane {
           return await this.listEvents(request);
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       const protocolError = error instanceof ControlPlaneProtocolError
         ? error
-        : new ControlPlaneProtocolError("control_plane_error", "Control Plane request failed");
+        : new ControlPlaneProtocolError("control_plane_error", message);
       return failure(requestId, protocolError.code, protocolError.message);
     }
   }
@@ -344,6 +349,16 @@ export class AgentControlPlane {
     });
   }
 
+  private registerProfile(
+    request: Extract<ControlPlaneRequest, { type: "register_profile" }>,
+  ): ControlPlaneSuccess<{ profileId: string; version: number }> {
+    const registered = this.registry.register(request.profile);
+    return success(request.requestId, {
+      profileId: registered.id,
+      version: registered.version,
+    });
+  }
+
   private async retryAgent(
     request: Extract<ControlPlaneRequest, { type: "retry_agent" }>,
   ): Promise<ControlPlaneSuccess<{
@@ -396,6 +411,9 @@ function parseRequest(input: unknown): ControlPlaneRequest {
     case "run_agent":
       requireString(value, "profileId");
       requireTask(value.task);
+      return value as unknown as ControlPlaneRequest;
+    case "register_profile":
+      requireProfile(value.profile);
       return value as unknown as ControlPlaneRequest;
     case "retry_agent":
       requireString(value, "agentTaskId");
@@ -450,8 +468,7 @@ function requireString(value: Record<string, unknown>, key: string): void {
   }
 }
 
-function requireTask(value: unknown): void {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+function requireTask(value: unknown): void {  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new ControlPlaneProtocolError("invalid_request", "task is required");
   }
   const task = value as Record<string, unknown>;
@@ -468,6 +485,24 @@ function requireTask(value: unknown): void {
     if (task[key] !== undefined && (!Array.isArray(task[key]) || task[key].some((item) => typeof item !== "string"))) {
       throw new ControlPlaneProtocolError("invalid_request", `task.${key} must be an array of strings`);
     }
+  }
+}
+
+function requireProfile(value: unknown): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new ControlPlaneProtocolError("invalid_request", "profile is required");
+  }
+  const profile = value as Record<string, unknown>;
+  requireString(profile, "id");
+  requireString(profile, "name");
+  if (typeof profile.version !== "number" || !Number.isSafeInteger(profile.version) || profile.version < 1) {
+    throw new ControlPlaneProtocolError("invalid_request", "profile.version must be a positive integer");
+  }
+  if (typeof profile.identity !== "object" || profile.identity === null) {
+    throw new ControlPlaneProtocolError("invalid_request", "profile.identity is required");
+  }
+  if (typeof profile.execution !== "object" || profile.execution === null) {
+    throw new ControlPlaneProtocolError("invalid_request", "profile.execution is required");
   }
 }
 
