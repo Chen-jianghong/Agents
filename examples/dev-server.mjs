@@ -19,8 +19,12 @@ import { join, resolve } from "node:path";
 import { createMultiAgentRuntimeAsync, FileModelConfigStore, FileRunStore } from "../dist/src/index.js";
 
 const args = process.argv.slice(2);
-const port = Number(args[args.indexOf("--port") + 1] ?? 8787);
-const dataDir = resolve(args[args.indexOf("--data") + 1] ?? ".multi-agent-dev");
+const argValue = (flag) => {
+  const i = args.indexOf(flag);
+  return i >= 0 ? args[i + 1] : undefined;
+};
+const port = Number(argValue("--port") ?? 8787);
+const dataDir = resolve(argValue("--data") ?? ".multi-agent-dev");
 mkdirSync(dataDir, { recursive: true });
 
 /** 本地 JSON 文件 SecretStore（演示用；生产请替换为宿主 SecretStore）。 */

@@ -99,28 +99,25 @@ npm run dev-server            # 或 node examples/dev-server.mjs --port 8787 --d
 - API Key 存入 `<data>/secrets.json`（本地文件 SecretStore，演示用；生产替换为宿主 SecretStore），Provider 配置只保留 `apiKeySecretRef` 引用；
 - 同时提供模型配置中心、Run 调度和 Control Plane 的完整 REST 接口。
 
-### Windows 桌面应用（EXE）
+### Windows 桌面应用（ZaoHua Code）
 
-Electron + React 桌面客户端（企划书 Phase 6 起步），内置完整 Runtime，不需要浏览器：
+Flutter 桌面客户端，内置完整 Runtime（通过 esbuild 打包为单文件 `backend.mjs`），无需浏览器、无需安装 Node.js：
 
 ```bash
-npm run build:desktop        # 编译主进程 + 渲染进程
-npm run desktop:dev          # 本地运行桌面应用（开发验证）
-npm run dist:desktop         # 打包 NSIS 安装包 → apps/desktop/release/Multi-Agent Dev Setup *.exe
+cd apps/desktop_flutter
+flutter run          # 开发运行（需要本机 node，启动后点击「启动本地引擎」）
+
+npm run dist:zaohua  # 一键打包：bundle 后端 + flutter build + Inno Setup → apps/release/ZaoHua-Code-Setup-*.exe
 ```
 
-- **架构**：主进程内置 `createMultiAgentRuntimeAsync` + 回环 REST server（随机端口）；`preload.cts`（CJS）通过 `contextBridge` 只暴露 API 地址，渲染进程（React）用 fetch 访问 REST API，不接触 Node/Pi 对象（contextIsolation + sandbox）；
+- **架构**：Flutter UI（三栏工作台：会话/项目导航 + 中间工作区 + 右侧信息面板）→ HTTP/SSE → 本地 Node.js Runtime（`resources/node.exe` + `resources/backend.mjs`，数据存 `%LOCALAPPDATA%/ZaoHua Code/data`）；
 - **界面**：
   - 供应商管理页（添加表单：名称 / API 地址 / API Key / 模型名称 / 上下文 + 已配置供应商列表与删除）；
-  - 开发任务页（自然语言需求提交 → 创建并启动 Run，Run 列表实时刷新、可取消）；
-  - Run 详情页（状态、任务 DAG 图、任务状态表、SSE 实时事件日志、**暂停/继续/取消/重试/集成/审查/合并**；任务可展开查看**结果详情**：真实 git Diff / 修改文件列表 / 测试结果 / 风险 / token 与成本 / Agent 输出）；
-  - 任务完成后宿主自动执行 Planner 输出的 `testCommands`（在任务工作区，结果写入任务测试表，失败不影响任务状态）；
-  - **Run 集成**：Run 终态后可点击集成，按依赖顺序把各任务 diff 合并到 `integration/<run-id>` 分支，展示合并结果与冲突；
-  - **代码审查**：Reviewer Agent 审查集成 diff，展示 findings / recommendations / risks / evidence；
-  - **合并到 main**：集成成功后一键把分支合并回主分支；
-  - **登录认证**：启动后先登录（默认 `admin` / `admin`，数据存 `users.json`），退出登录可切换账号；
-- **数据**：存于 `%APPDATA%/multi-agent-dev-runtime/data/`（模型配置 / secrets.json / runs），API Key 不落 Provider 配置；
-- **安全**：CSP 限制 `connect-src http://127.0.0.1:*`，回环绑定，Renderer 无 Node 能力。
+  - 开发任务页（自然语言需求提交 → 创建并启动 Run，Run 列表 3 秒轮询、可取消）；
+  - Run 详情页（状态元信息、任务状态表、SSE 实时事件日志、暂停/继续/取消/重试）；
+  - 右侧面板（引擎连接状态、已配置供应商数、Run 数、工作区信息）；
+- **无登录**：桌面端为本机单用户应用，无需账号认证；
+- **安全**：REST API 只绑定 `127.0.0.1`，API Key 只写入本地 `secrets.json`。
 
 ## 当前入口
 
