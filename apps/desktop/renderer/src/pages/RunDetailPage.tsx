@@ -4,6 +4,9 @@ import {
   getRun,
   listRunHistory,
   openRunEvents,
+  pauseRun,
+  resumeRun,
+  retryRun,
   type AgentEvent,
   type PlanTask,
   type RunSnapshot,
@@ -119,6 +122,21 @@ export function RunDetailPage({
     await load();
   };
 
+  const onPause = async () => {
+    await pauseRun(runId);
+    await load();
+  };
+
+  const onResume = async () => {
+    await resumeRun(runId);
+    await load();
+  };
+
+  const onRetry = async () => {
+    await retryRun(runId);
+    await load();
+  };
+
   const nodes = run?.dag ? layoutDag(run.dag.tasks) : [];
   const levels = nodes.length > 0 ? Math.max(...nodes.map((node) => node.level)) + 1 : 0;
 
@@ -127,6 +145,15 @@ export function RunDetailPage({
       <div style={styles.header}>
         <button style={styles.backButton} onClick={onBack}>← 返回</button>
         <h2 style={styles.title}>Run 详情</h2>
+        {run && !TERMINAL.has(run.status) && run.status !== "created" && !run.paused && (
+          <button style={styles.pauseButton} onClick={() => void onPause()}>暂停</button>
+        )}
+        {run && run.paused && (
+          <button style={styles.resumeButton} onClick={() => void onResume()}>继续</button>
+        )}
+        {run && (run.status === "failed" || run.status === "cancelled") && (
+          <button style={styles.retryButton} onClick={() => void onRetry()}>重试 Run</button>
+        )}
         {run && !TERMINAL.has(run.status) && run.status !== "created" && (
           <button style={styles.cancelButton} onClick={() => void onCancel()}>取消 Run</button>
         )}
@@ -142,7 +169,7 @@ export function RunDetailPage({
             <div style={styles.runMeta}>
               <span style={styles.mono}>{run.runId}</span>
               <span style={{ ...styles.badge, background: STATUS_COLORS[run.status] ?? "#6b7280" }}>
-                {run.status}
+                {run.paused ? "paused" : run.status}
               </span>
             </div>
             <div style={styles.goal}>{run.goal}</div>
@@ -369,6 +396,33 @@ const styles: Record<string, React.CSSProperties> = {
   cancelButton: {
     padding: "8px 14px",
     background: "#b91c1c",
+    color: "#fff",
+    border: 0,
+    borderRadius: 6,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  pauseButton: {
+    padding: "8px 14px",
+    background: "#d97706",
+    color: "#fff",
+    border: 0,
+    borderRadius: 6,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  resumeButton: {
+    padding: "8px 14px",
+    background: "#0a7d33",
+    color: "#fff",
+    border: 0,
+    borderRadius: 6,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  retryButton: {
+    padding: "8px 14px",
+    background: "#2563eb",
     color: "#fff",
     border: 0,
     borderRadius: 6,

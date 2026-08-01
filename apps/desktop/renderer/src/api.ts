@@ -136,6 +136,7 @@ export interface RunSnapshot {
   goal: string;
   workspace: string;
   maxParallel: number;
+  paused?: boolean;
   dag?: { goal: string; tasks: PlanTask[] };
   tasks: RunTaskSnapshot[];
   error?: { code: string; message: string };
@@ -165,6 +166,18 @@ export function startRun(runId: string): Promise<{ status: number; data: RunSnap
 
 export function cancelRun(runId: string): Promise<{ status: number; data: unknown }> {
   return apiFetch(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
+}
+
+export function pauseRun(runId: string): Promise<{ status: number; data: RunSnapshot }> {
+  return apiFetch<RunSnapshot>(`/api/runs/${encodeURIComponent(runId)}/pause`, { method: "POST" });
+}
+
+export function resumeRun(runId: string): Promise<{ status: number; data: RunSnapshot }> {
+  return apiFetch<RunSnapshot>(`/api/runs/${encodeURIComponent(runId)}/resume`, { method: "POST" });
+}
+
+export function retryRun(runId: string): Promise<{ status: number; data: RunSnapshot }> {
+  return apiFetch<RunSnapshot>(`/api/runs/${encodeURIComponent(runId)}/retry`, { method: "POST" });
 }
 
 export function listRuns(): Promise<{ status: number; data: RunSnapshot[] }> {

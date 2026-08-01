@@ -105,6 +105,7 @@ interface RunState {
   createdAt: string;
   updatedAt: string;
   cancellationRequested: boolean;
+  paused: boolean;
   scheduling: boolean;
 }
 
@@ -145,6 +146,7 @@ export class RunScheduler {
       createdAt: now,
       updatedAt: now,
       cancellationRequested: false,
+      paused: false,
       scheduling: false,
     };
     this.runs.set(run.runId, run);
@@ -269,6 +271,56 @@ export class RunScheduler {
     await this.schedule(run.runId);
   }
 
+  /** Pause a Run: no new tasks start; already-running tasks finish. */
+  pauseRun(runId: string): RunSnapshot {
+    const run = this.requireRun(runId);
+    if (isTerminal(run.status)) return this.snapshot(run);
+    run.paused = true;
+    this.touch(run);
+    this.emit(run, "run.paused", { runId });
+    return this.snapshot(run);
+  }
+
+  /** Resume a paused Run: scheduling continues. */
+  resumeRun(runId: string): RunSnapshot {
+    const run = this.requireRun(runId);
+    if (!run.paused) return this.snapshot(run);
+    run.paused = false;
+    this.touch(run);
+    this.emit(run, "run.resumed", { runId });
+    void this.schedule(run.runId);
+    return this.snapshot(run);
+  }
+
+  /**
+   * Retry a failed/cancelled Run: non-succeeded tasks reset to pending and
+   * the Run is scheduled again. Succeeded tasks keep their results.
+   */
+  retryRun(runId: string): RunSnapshot {
+    const run = this.requireRun(runId);
+    if (run.status !== "failed" && run.status !== "cancelled") {
+      throw new Error(`run ${runId} cannot be retried from status ${run.status}`);
+    }
+    for (const task of run.tasks.values()) {
+      if (task.status === "succeeded") continue;
+      task.status = "pending";
+      delete task.result;
+      delete task.error;
+      delete task.agentTaskId;
+      delete task.profileId;
+    }
+    run.status = "running";
+    delete run.error;
+    run.cancellationRequested = false;
+    run.paused = false;
+    // Invalidate the cached terminal result so waitForRun observes the retry.
+    this.results.delete(run.runId);
+    this.touch(run);
+    this.emit(run, "run.retried", { runId });
+    void this.schedule(run.runId);
+    return this.snapshot(run);
+  }
+
   getRun(runId: string): RunSnapshot | undefined {
     const run = this.runs.get(runId);
     return run ? this.snapshot(run) : undefined;
@@ -311,6 +363,12 @@ export class RunScheduler {
           if (!hasActiveTasks(run)) {
             this.finalize(run);
           }
+          return;
+        }
+
+        // Paused: no new tasks start; running tasks finish and re-trigger
+        // schedule() from their completion callback.
+        if (run.paused && hasActiveTasks(run)) {
           return;
         }
 
@@ -416,6 +474,7 @@ export class RunScheduler {
       task: task.planTask.title,
       acceptanceCriteria: task.planTask.acceptanceCriteria,
       ...(task.planTask.writePaths.length > 0 ? { writePaths: task.planTask.writePaths } : {}),
+      ...(task.planTask.testCommands.length > 0 ? { testCommands: task.planTask.testCommands } : {}),
       depth: 0,
     };
 
@@ -504,6 +563,7 @@ export class RunScheduler {
       maxParallel: run.maxParallel,
       ...(run.dag ? { dag: run.dag } : {}),
       tasks: this.taskSnapshots(run),
+      ...(run.paused ? { paused: true } : {}),
       ...(run.error ? { error: run.error } : {}),
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
@@ -583,6 +643,7 @@ export class RunScheduler {
       createdAt: snapshot.createdAt,
       updatedAt: snapshot.updatedAt,
       cancellationRequested: false,
+      paused: snapshot.paused === true,
       scheduling: false,
     };
   }

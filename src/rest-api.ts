@@ -214,6 +214,18 @@ export class MultiAgentRestApiServer {
         requireMethod(request, "POST");
         await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "cancel_run", runId }));
         return;
+      case "pause":
+        requireMethod(request, "POST");
+        await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "pause_run", runId }));
+        return;
+      case "resume":
+        requireMethod(request, "POST");
+        await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "resume_run", runId }));
+        return;
+      case "retry":
+        requireMethod(request, "POST");
+        await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "retry_run", runId }));
+        return;
       case "graph":
       case "tasks":
         requireMethod(request, "GET");

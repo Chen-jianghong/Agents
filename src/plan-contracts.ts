@@ -122,6 +122,8 @@ export interface RunSnapshot {
   maxParallel: number;
   dag?: TaskDAG;
   tasks: RunTaskSnapshot[];
+  /** True while the Run is paused (no new tasks start). */
+  paused?: boolean;
   error?: { code: string; message: string };
   createdAt: string;
   updatedAt: string;

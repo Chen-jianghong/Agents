@@ -1,9 +1,12 @@
 import type { Model } from "@earendil-works/pi-ai/compat";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type {
   AgentEvent,
   AgentProfile,
   AgentResult,
   AgentTask,
+  TestResult,
 } from "./contracts.js";
 import type { ManagedAgent, PiSessionFactoryOptions } from "./pi-adapter.js";
 import type { ModelAliases } from "./model-runtime.js";
@@ -292,6 +295,16 @@ export class PiAgentManager {
           } catch {
             // A failed diff capture must not fail the task itself.
           }
+        }
+        // Run the task's test commands inside the task workspace, then attach
+        // their outcomes to the result (a failing test does not fail the task).
+        if (result.status === "completed" && task.testCommands?.length) {
+          const cwd = workspaceLease?.cwd ?? options.cwd;
+          const tests = [...result.tests];
+          for (const command of task.testCommands) {
+            tests.push(await runTestCommand(command, cwd));
+          }
+          result = { ...result, tests };
         }
         this.results.set(task.id, result);
         this.enqueueTaskRecord(profile, task, toTaskStatus(result.status), {
@@ -914,5 +927,33 @@ function assertMatchingExecutionSnapshot(
 function assertPositiveInteger(value: number, name: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${name} must be a positive safe integer`);
+  }
+}
+
+const execFileAsync = promisify(execFile);
+
+const TEST_COMMAND_TIMEOUT_MS = 120_000;
+const TEST_OUTPUT_LIMIT = 2000;
+
+/**
+ * Run one test command inside the task workspace. The command is split on
+ * whitespace (no shell interpretation); a non-zero exit or a timeout marks
+ * the test as failed without failing the task itself.
+ */
+async function runTestCommand(command: string, cwd: string): Promise<TestResult> {
+  const parts = command.trim().split(/\s+/);
+  const executable = parts[0] ?? "";
+  const args = parts.slice(1);
+  try {
+    const { stdout, stderr } = await execFileAsync(executable, args, {
+      cwd,
+      timeout: TEST_COMMAND_TIMEOUT_MS,
+      maxBuffer: 1024 * 1024,
+      encoding: "utf8",
+    });
+    return { command, passed: true, output: `${stdout}${stderr}`.slice(0, TEST_OUTPUT_LIMIT) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { command, passed: false, output: message.slice(0, TEST_OUTPUT_LIMIT) };
   }
 }

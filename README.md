@@ -113,7 +113,8 @@ npm run dist:desktop         # 打包 NSIS 安装包 → apps/desktop/release/Mu
 - **界面**：
   - 供应商管理页（添加表单：名称 / API 地址 / API Key / 模型名称 / 上下文 + 已配置供应商列表与删除）；
   - 开发任务页（自然语言需求提交 → 创建并启动 Run，Run 列表实时刷新、可取消）；
-  - Run 详情页（状态、任务 DAG 图、任务状态表、SSE 实时事件日志、取消；任务可展开查看**结果详情**：真实 git Diff / 修改文件列表 / 测试结果 / 风险 / token 与成本 / Agent 输出）；
+  - Run 详情页（状态、任务 DAG 图、任务状态表、SSE 实时事件日志、**暂停/继续/取消/重试**；任务可展开查看**结果详情**：真实 git Diff / 修改文件列表 / 测试结果 / 风险 / token 与成本 / Agent 输出）；
+  - 任务完成后宿主自动执行 Planner 输出的 `testCommands`（在任务工作区，结果写入任务测试表，失败不影响任务状态）；
 - **数据**：存于 `%APPDATA%/multi-agent-dev-runtime/data/`（模型配置 / secrets.json / runs），API Key 不落 Provider 配置；
 - **安全**：CSP 限制 `connect-src http://127.0.0.1:*`，回环绑定，Renderer 无 Node 能力。
 
@@ -471,6 +472,9 @@ const address = await server.start(); // 默认只绑定 127.0.0.1
 | GET | `/api/runs/:runId/graph` | Run 的 TaskDAG |
 | GET | `/api/runs/:runId/tasks` | Run 的任务列表 |
 | POST | `/api/runs/:runId/start` | 启动 Run（异步，立即返回 planning 快照） |
+| POST | `/api/runs/:runId/pause` | 暂停 Run（不再启动新任务，运行中的任务继续） |
+| POST | `/api/runs/:runId/resume` | 继续已暂停的 Run |
+| POST | `/api/runs/:runId/retry` | 重试失败的 Run（非 succeeded 任务重置重新调度，成功任务保留） |
 | POST | `/api/runs/:runId/cancel` | 取消 Run |
 | GET | `/api/runs/:runId/events` | SSE 事件流（按 Run 过滤，事件用 `data:` JSON 帧推送） |
 | GET | `/api/runs/:runId/events/history` | 已持久化的历史事件（断线重连补事件） |

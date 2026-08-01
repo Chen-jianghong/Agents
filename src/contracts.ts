@@ -130,6 +130,8 @@ export interface AgentTask {
   parentSummary?: string;
   files?: string[];
   writePaths?: string[];
+  /** Test commands the host runs in the task workspace after the Agent finishes. */
+  testCommands?: string[];
   depth: number;
 }
 

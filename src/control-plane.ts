@@ -31,6 +31,9 @@ export type ControlPlaneRequest =
   }
   | ControlPlaneRequestBase<"start_run"> & { runId: string }
   | ControlPlaneRequestBase<"cancel_run"> & { runId: string }
+  | ControlPlaneRequestBase<"pause_run"> & { runId: string }
+  | ControlPlaneRequestBase<"resume_run"> & { runId: string }
+  | ControlPlaneRequestBase<"retry_run"> & { runId: string }
   | ControlPlaneRequestBase<"get_run"> & { runId: string }
   | ControlPlaneRequestBase<"list_runs">
   | ControlPlaneRequestBase<"list_events"> & { filter?: AgentEventFilter & { runId?: string } };
@@ -157,6 +160,12 @@ export class AgentControlPlane {
           return this.startRun(request);
         case "cancel_run":
           return await this.cancelRun(request);
+        case "pause_run":
+          return this.pauseRun(request);
+        case "resume_run":
+          return this.resumeRun(request);
+        case "retry_run":
+          return this.retryRun(request);
         case "get_run":
           return success(request.requestId, this.getRun(request.runId));
         case "list_runs":
@@ -257,6 +266,27 @@ export class AgentControlPlane {
   private getRun(runId: string): RunSnapshot | null {
     const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
     return scheduler.getRun(runId) ?? null;
+  }
+
+  private pauseRun(
+    request: Extract<ControlPlaneRequest, { type: "pause_run" }>,
+  ): ControlPlaneSuccess<RunSnapshot> {
+    const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
+    return success(request.requestId, scheduler.pauseRun(request.runId));
+  }
+
+  private resumeRun(
+    request: Extract<ControlPlaneRequest, { type: "resume_run" }>,
+  ): ControlPlaneSuccess<RunSnapshot> {
+    const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
+    return success(request.requestId, scheduler.resumeRun(request.runId));
+  }
+
+  private retryRun(
+    request: Extract<ControlPlaneRequest, { type: "retry_run" }>,
+  ): ControlPlaneSuccess<RunSnapshot> {
+    const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
+    return success(request.requestId, scheduler.retryRun(request.runId));
   }
 
   private listRuns(): RunSnapshot[] {
@@ -439,6 +469,9 @@ function parseRequest(input: unknown): ControlPlaneRequest {
       return value as unknown as ControlPlaneRequest;
     case "start_run":
     case "cancel_run":
+    case "pause_run":
+    case "resume_run":
+    case "retry_run":
     case "get_run":
       requireString(value, "runId");
       return value as unknown as ControlPlaneRequest;

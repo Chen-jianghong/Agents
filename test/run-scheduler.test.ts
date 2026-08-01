@@ -318,4 +318,66 @@ describe("RunScheduler", () => {
       "run.succeeded",
     ]);
   });
+
+  it("pauses scheduling of new tasks and resumes later", async () => {
+    const dag: TaskDAG = {
+      goal: "x",
+      tasks: [
+        task({ id: "a", writePaths: ["a"] }),
+        task({ id: "b", writePaths: ["b"] }),
+        task({ id: "c", writePaths: ["c"] }),
+      ],
+    };
+    const manager = new FakeManager();
+    const scheduler = makeScheduler(stubPlanner(planned(dag)), manager);
+
+    const run = scheduler.createRun({ goal: dag.goal, workspace: "C:/ws/project", maxParallel: 2 });
+    await scheduler.startRun(run.runId);
+
+    await waitFor(() => manager.calls.length >= 2);
+    assert.equal(manager.calls.length, 2);
+
+    // Pause: finishing a task must not start the next one.
+    scheduler.pauseRun(run.runId);
+    manager.calls[0]!.resolve(successResult(manager.calls[0]!.task.id));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(manager.calls.length, 2, "no new task starts while paused");
+
+    // Resume: the pending task starts.
+    scheduler.resumeRun(run.runId);
+    await waitFor(() => manager.calls.length >= 3);
+    assert.equal(manager.calls.length, 3);
+    manager.calls[1]!.resolve(successResult(manager.calls[1]!.task.id));
+    manager.calls[2]!.resolve(successResult(manager.calls[2]!.task.id));
+
+    const result = await scheduler.waitForRun(run.runId);
+    assert.equal(result.status, "succeeded");
+    assert.ok(scheduler.getRun(run.runId)?.paused !== true);
+  });
+
+  it("retries a failed Run and succeeds on the second attempt", async () => {
+    const dag: TaskDAG = {
+      goal: "x",
+      tasks: [task({ id: "a", writePaths: ["a"] })],
+    };
+    const manager = new FakeManager();
+    const scheduler = makeScheduler(stubPlanner(planned(dag)), manager);
+
+    const run = scheduler.createRun({ goal: dag.goal, workspace: "C:/ws/project" });
+    await scheduler.startRun(run.runId);
+    await waitFor(() => manager.calls.length >= 1);
+    manager.calls[0]!.resolve(failedResult(manager.calls[0]!.task.id));
+
+    const first = await scheduler.waitForRun(run.runId);
+    assert.equal(first.status, "failed");
+
+    // Retry resets the failed task and schedules it again.
+    scheduler.retryRun(run.runId);
+    await waitFor(() => manager.calls.length >= 2);
+    assert.equal(manager.calls.length, 2);
+    manager.calls[1]!.resolve(successResult(manager.calls[1]!.task.id));
+
+    const second = await scheduler.waitForRun(run.runId);
+    assert.equal(second.status, "succeeded");
+  });
 });
