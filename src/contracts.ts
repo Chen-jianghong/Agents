@@ -153,6 +153,8 @@ export interface AgentResult {
   changedFiles: string[];
   tests: TestResult[];
   risks: string[];
+  /** Unified diff captured from the task workspace before it is released. */
+  diff?: string;
   error?: {
     code: string;
     message: string;

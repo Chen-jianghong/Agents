@@ -284,6 +284,15 @@ export class PiAgentManager {
             error instanceof Error ? error.message : "Agent event persistence failed",
           );
         }
+        // Capture the task's diff before the workspace (worktree) is released.
+        if (workspaceLease?.captureDiff) {
+          try {
+            const diff = await workspaceLease.captureDiff();
+            if (diff) result = { ...result, diff };
+          } catch {
+            // A failed diff capture must not fail the task itself.
+          }
+        }
         this.results.set(task.id, result);
         this.enqueueTaskRecord(profile, task, toTaskStatus(result.status), {
           sessionId: managedAgent.sessionId,

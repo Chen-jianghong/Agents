@@ -18,6 +18,8 @@ export interface AgentWorkspaceLease {
   readonly cwd: string;
   readonly agentDir: string;
   readonly worktreePath?: string;
+  /** Capture the unified diff of this task's changes before release. */
+  captureDiff?(): Promise<string | undefined>;
   release(): Promise<void>;
 }
 
@@ -118,11 +120,25 @@ export class GitWorktreeProvider implements AgentWorkspaceProvider {
 
     let released = false;
     let releasing: Promise<void> | undefined;
+    // Pin the exact base commit: `git diff <commit>` must not follow a
+    // later HEAD (the Agent may commit inside the worktree).
+    const baseCommit = await this.git("-C", worktreePath, "rev-parse", "HEAD");
     return {
       sourceWorkspace,
       cwd: worktreePath,
       agentDir: resolve(worktreePath, ".pi"),
       worktreePath,
+      captureDiff: async () => {
+        // Stage everything first: plain `git diff` ignores untracked files
+        // (files an Agent created with the write tool). After staging,
+        // `--cached <base>` shows tracked edits, new files and commits.
+        await this.git("-C", worktreePath, "add", "-A");
+        const stat = await this.git("-C", worktreePath, "diff", "--stat", baseCommit);
+        const patch = await this.git("-C", worktreePath, "diff", "--cached", baseCommit);
+        if (!patch) return undefined;
+        const header = stat ? `${stat}\n` : "";
+        return `${header}${patch}`.slice(0, 64 * 1024);
+      },
       release: async () => {
         if (released) return;
         if (!releasing) {

@@ -16,6 +16,7 @@ interface TaskResult {
   changedFiles?: string[];
   tests?: Array<{ command: string; passed: boolean; output?: string }>;
   risks?: string[];
+  diff?: string;
   usage?: { totalTokens: number; costUsd: number; inputTokens: number; outputTokens: number };
   error?: { code: string; message: string };
 }
@@ -300,6 +301,13 @@ function TaskResultPanel({ result }: { result: TaskResult }) {
         </div>
       )}
 
+      {result.diff && (
+        <div style={styles.resultSection}>
+          <div style={styles.resultLabel}>代码变更（Diff）</div>
+          <pre style={styles.diffBlock}>{result.diff}</pre>
+        </div>
+      )}
+
       {(result.tests?.length ?? 0) > 0 && (
         <div style={styles.resultSection}>
           <div style={styles.resultLabel}>测试结果</div>
@@ -403,6 +411,18 @@ const styles: Record<string, React.CSSProperties> = {
   testFail: { color: "#b91c1c", fontWeight: 600 },
   testOutput: { fontSize: 12, color: "#52606d", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   riskItem: { fontSize: 12, color: "#b45309", marginBottom: 4 },
+  diffBlock: {
+    background: "#0f172a",
+    color: "#dbeafe",
+    borderRadius: 6,
+    padding: 10,
+    fontSize: 12,
+    fontFamily: "Consolas, monospace",
+    maxHeight: 320,
+    overflowY: "auto",
+    whiteSpace: "pre",
+    overflowX: "auto",
+  },
   outputBlock: {
     background: "#10151f",
     color: "#c9d4e4",
