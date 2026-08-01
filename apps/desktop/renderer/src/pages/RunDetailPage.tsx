@@ -7,7 +7,18 @@ import {
   type AgentEvent,
   type PlanTask,
   type RunSnapshot,
+  type RunTaskSnapshot,
 } from "../api";
+
+interface TaskResult {
+  status: string;
+  output?: string;
+  changedFiles?: string[];
+  tests?: Array<{ command: string; passed: boolean; output?: string }>;
+  risks?: string[];
+  usage?: { totalTokens: number; costUsd: number; inputTokens: number; outputTokens: number };
+  error?: { code: string; message: string };
+}
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "#9aa4b2",
@@ -69,6 +80,7 @@ export function RunDetailPage({
   const [run, setRun] = useState<RunSnapshot | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
@@ -199,21 +211,41 @@ export function RunDetailPage({
                     <th>状态</th>
                     <th>依赖</th>
                     <th>说明</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {run.tasks.map((task) => (
-                    <tr key={task.taskId}>
-                      <td style={styles.mono}>{task.taskId}</td>
-                      <td>{task.role}</td>
-                      <td>
-                        <span style={{ ...styles.badge, background: STATUS_COLORS[task.status] ?? "#9aa4b2" }}>
-                          {task.status}
-                        </span>
-                      </td>
-                      <td style={styles.mono}>{task.dependsOn.length > 0 ? task.dependsOn.join(", ") : "-"}</td>
-                      <td style={styles.errCell}>{task.error?.message ?? task.title}</td>
-                    </tr>
+                    <React.Fragment key={task.taskId}>
+                      <tr>
+                        <td style={styles.mono}>{task.taskId}</td>
+                        <td>{task.role}</td>
+                        <td>
+                          <span style={{ ...styles.badge, background: STATUS_COLORS[task.status] ?? "#9aa4b2" }}>
+                            {task.status}
+                          </span>
+                        </td>
+                        <td style={styles.mono}>{task.dependsOn.length > 0 ? task.dependsOn.join(", ") : "-"}</td>
+                        <td style={styles.errCell}>{task.error?.message ?? task.title}</td>
+                        <td>
+                          {task.result ? (
+                            <button
+                              style={styles.detailButton}
+                              onClick={() => setExpandedTask(expandedTask === task.taskId ? null : task.taskId)}
+                            >
+                              {expandedTask === task.taskId ? "收起" : "结果"}
+                            </button>
+                          ) : null}
+                        </td>
+                      </tr>
+                      {expandedTask === task.taskId && task.result ? (
+                        <tr>
+                          <td colSpan={6}>
+                            <TaskResultPanel result={task.result as unknown as TaskResult} />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -237,6 +269,79 @@ export function RunDetailPage({
             </div>
           </section>
         </>
+      )}
+    </div>
+  );
+}
+
+function TaskResultPanel({ result }: { result: TaskResult }) {
+  return (
+    <div style={styles.resultPanel}>
+      <div style={styles.resultHeader}>
+        <span>状态：<b style={{ color: result.status === "completed" ? "#0a7d33" : "#b91c1c" }}>{result.status}</b></span>
+        {result.usage && (
+          <span style={styles.usage}>
+            tokens {result.usage.totalTokens}（in {result.usage.inputTokens} / out {result.usage.outputTokens}）
+            {" · "}成本 ${result.usage.costUsd.toFixed(6)}
+          </span>
+        )}
+      </div>
+
+      {result.error && <div style={styles.msgErr}>错误：{result.error.message}</div>}
+
+      {(result.changedFiles?.length ?? 0) > 0 && (
+        <div style={styles.resultSection}>
+          <div style={styles.resultLabel}>修改文件（{result.changedFiles!.length}）</div>
+          <div style={styles.fileList}>
+            {result.changedFiles!.map((file) => (
+              <div key={file} style={styles.fileItem}>📄 {file}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(result.tests?.length ?? 0) > 0 && (
+        <div style={styles.resultSection}>
+          <div style={styles.resultLabel}>测试结果</div>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th>命令</th>
+                <th>结果</th>
+                <th>输出</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.tests!.map((test, index) => (
+                <tr key={`${test.command}-${index}`}>
+                  <td style={styles.mono}>{test.command}</td>
+                  <td>
+                    <span style={test.passed ? styles.testPass : styles.testFail}>
+                      {test.passed ? "通过" : "失败"}
+                    </span>
+                  </td>
+                  <td style={styles.testOutput}>{test.output ? String(test.output).slice(0, 200) : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(result.risks?.length ?? 0) > 0 && (
+        <div style={styles.resultSection}>
+          <div style={styles.resultLabel}>风险</div>
+          {result.risks!.map((risk, index) => (
+            <div key={index} style={styles.riskItem}>⚠ {risk}</div>
+          ))}
+        </div>
+      )}
+
+      {result.output && (
+        <div style={styles.resultSection}>
+          <div style={styles.resultLabel}>Agent 输出</div>
+          <pre style={styles.outputBlock}>{result.output.slice(0, 2000)}</pre>
+        </div>
       )}
     </div>
   );
@@ -273,6 +378,42 @@ const styles: Record<string, React.CSSProperties> = {
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
   mono: { fontFamily: "Consolas, monospace", fontSize: 12 },
   errCell: { fontSize: 12, color: "#52606d", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  detailButton: {
+    padding: "4px 10px",
+    border: "1px solid #cbd2d9",
+    borderRadius: 6,
+    background: "#fff",
+    cursor: "pointer",
+    fontSize: 12,
+  },
+  resultPanel: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 14 },
+  resultHeader: { display: "flex", alignItems: "center", gap: 16, marginBottom: 10, fontSize: 13 },
+  usage: { fontSize: 12, color: "#52606d" },
+  resultSection: { marginTop: 10 },
+  resultLabel: { fontSize: 13, fontWeight: 600, marginBottom: 6 },
+  fileList: { display: "flex", flexWrap: "wrap", gap: 8 },
+  fileItem: {
+    fontSize: 12,
+    fontFamily: "Consolas, monospace",
+    background: "#eef2f7",
+    borderRadius: 4,
+    padding: "3px 8px",
+  },
+  testPass: { color: "#0a7d33", fontWeight: 600 },
+  testFail: { color: "#b91c1c", fontWeight: 600 },
+  testOutput: { fontSize: 12, color: "#52606d", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  riskItem: { fontSize: 12, color: "#b45309", marginBottom: 4 },
+  outputBlock: {
+    background: "#10151f",
+    color: "#c9d4e4",
+    borderRadius: 6,
+    padding: 10,
+    fontSize: 12,
+    maxHeight: 200,
+    overflowY: "auto",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-all",
+  },
   log: {
     background: "#10151f",
     color: "#c9d4e4",
