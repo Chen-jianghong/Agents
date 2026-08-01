@@ -226,6 +226,10 @@ export class MultiAgentRestApiServer {
         requireMethod(request, "POST");
         await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "retry_run", runId }));
         return;
+      case "integrate":
+        requireMethod(request, "POST");
+        await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "integrate_run", runId }));
+        return;
       case "graph":
       case "tasks":
         requireMethod(request, "GET");

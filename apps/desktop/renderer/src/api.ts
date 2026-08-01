@@ -180,6 +180,20 @@ export function retryRun(runId: string): Promise<{ status: number; data: RunSnap
   return apiFetch<RunSnapshot>(`/api/runs/${encodeURIComponent(runId)}/retry`, { method: "POST" });
 }
 
+export interface IntegrationReport {
+  runId: string;
+  status: string;
+  branch?: string;
+  baseCommit?: string;
+  appliedTasks: string[];
+  conflicts: Array<{ taskId: string; detail: string }>;
+  message: string;
+}
+
+export function integrateRun(runId: string): Promise<{ status: number; data: IntegrationReport | { error: { message: string } } }> {
+  return apiFetch<IntegrationReport>(`/api/runs/${encodeURIComponent(runId)}/integrate`, { method: "POST" });
+}
+
 export function listRuns(): Promise<{ status: number; data: RunSnapshot[] }> {
   return apiFetch<RunSnapshot[]>("/api/runs");
 }

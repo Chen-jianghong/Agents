@@ -41,6 +41,7 @@ import { PlannerService } from "./planner.js";
 import { RunScheduler } from "./run-scheduler.js";
 import { FileModelConfigStore, type ModelProfileConfig } from "./model-config.js";
 import { ModelConfigService, type SecretStore } from "./model-config-service.js";
+import type { RunIntegrator } from "./run-integrator.js";
 
 export interface MultiAgentRuntimeOptions {
   policy?: FactoryPolicy;
@@ -62,6 +63,8 @@ export interface MultiAgentRuntimeOptions {
   secrets?: SecretStore;
   /** Default model profiles seeded when the store has none. */
   defaultModelProfiles?: ModelProfileConfig[];
+  /** Optional integrator for Control Plane / REST integrate_run commands. */
+  integrator?: RunIntegrator;
   /**
    * Build a shared RunScheduler from controlPlaneExecution and mount it on
    * the Control Plane (requires controlPlaneExecution). When false or
@@ -230,6 +233,7 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
     ...(controlPlaneExecution ? { execution: controlPlaneExecution } : {}),
     ...(controlPlaneScheduler ? { runScheduler: controlPlaneScheduler } : {}),
     ...(options.eventStore ? { eventStore: options.eventStore } : {}),
+    ...(options.integrator ? { integrator: options.integrator } : {}),
   });
   const createControlPlaneHttpServer = (serverOptions: ControlPlaneHttpServerOptions = {}) =>
     new ControlPlaneHttpServer(controlPlane, serverOptions);

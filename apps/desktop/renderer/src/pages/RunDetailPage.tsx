@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelRun,
   getRun,
+  integrateRun,
   listRunHistory,
   openRunEvents,
   pauseRun,
   resumeRun,
   retryRun,
   type AgentEvent,
+  type IntegrationReport,
   type PlanTask,
   type RunSnapshot,
   type RunTaskSnapshot,
@@ -85,6 +87,7 @@ export function RunDetailPage({
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const [integration, setIntegration] = useState<IntegrationReport | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
@@ -137,6 +140,22 @@ export function RunDetailPage({
     await load();
   };
 
+  const onIntegrate = async () => {
+    const result = await integrateRun(runId);
+    if (result.status === 200) {
+      setIntegration(result.data as IntegrationReport);
+    } else {
+      const error = (result.data as { error?: { message?: string } }).error;
+      setIntegration({
+        runId,
+        status: "failed",
+        appliedTasks: [],
+        conflicts: [],
+        message: error?.message ?? `集成失败：${result.status}`,
+      });
+    }
+  };
+
   const nodes = run?.dag ? layoutDag(run.dag.tasks) : [];
   const levels = nodes.length > 0 ? Math.max(...nodes.map((node) => node.level)) + 1 : 0;
 
@@ -153,6 +172,9 @@ export function RunDetailPage({
         )}
         {run && (run.status === "failed" || run.status === "cancelled") && (
           <button style={styles.retryButton} onClick={() => void onRetry()}>重试 Run</button>
+        )}
+        {run && (run.status === "succeeded" || run.status === "failed") && (
+          <button style={styles.integrateButton} onClick={() => void onIntegrate()}>集成</button>
         )}
         {run && !TERMINAL.has(run.status) && run.status !== "created" && (
           <button style={styles.cancelButton} onClick={() => void onCancel()}>取消 Run</button>
@@ -180,6 +202,37 @@ export function RunDetailPage({
             </div>
             {run.error && <div style={styles.msgErr}>Run 错误：{run.error.message}</div>}
           </section>
+
+          {integration && (
+            <section style={styles.card}>
+              <h3 style={styles.cardTitle}>集成结果</h3>
+              <div style={styles.runMeta}>
+                <span style={{ ...styles.badge, background: integration.status === "merged" ? "#0a7d33" : integration.status === "conflict" ? "#b91c1c" : "#6b7280" }}>
+                  {integration.status}
+                </span>
+                <span>{integration.message}</span>
+              </div>
+              {integration.branch && (
+                <div style={styles.metaLine}>
+                  分支：<span style={styles.mono}>{integration.branch}</span>
+                  {" · base "}<span style={styles.mono}>{integration.baseCommit?.slice(0, 8)}</span>
+                </div>
+              )}
+              {integration.appliedTasks.length > 0 && (
+                <div style={styles.metaLine}>已集成任务：{integration.appliedTasks.join(", ")}</div>
+              )}
+              {integration.conflicts.length > 0 && (
+                <div style={styles.resultSection}>
+                  <div style={styles.resultLabel}>冲突（需人工处理）</div>
+                  {integration.conflicts.map((conflict) => (
+                    <div key={conflict.taskId} style={styles.riskItem}>
+                      ⚠ {conflict.taskId}：{conflict.detail}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {run.dag && nodes.length > 0 && (
             <section style={styles.card}>
@@ -423,6 +476,15 @@ const styles: Record<string, React.CSSProperties> = {
   retryButton: {
     padding: "8px 14px",
     background: "#2563eb",
+    color: "#fff",
+    border: 0,
+    borderRadius: 6,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  integrateButton: {
+    padding: "8px 14px",
+    background: "#7c3aed",
     color: "#fff",
     border: 0,
     borderRadius: 6,

@@ -11,6 +11,7 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentWorkspaceProvider } from "./workspace.js";
 import type { RunSnapshot } from "./plan-contracts.js";
 import type { RunScheduler } from "./run-scheduler.js";
+import type { RunIntegrator, IntegrationReport } from "./run-integrator.js";
 
 export const CONTROL_PLANE_VERSION = "v1" as const;
 
@@ -34,6 +35,7 @@ export type ControlPlaneRequest =
   | ControlPlaneRequestBase<"pause_run"> & { runId: string }
   | ControlPlaneRequestBase<"resume_run"> & { runId: string }
   | ControlPlaneRequestBase<"retry_run"> & { runId: string }
+  | ControlPlaneRequestBase<"integrate_run"> & { runId: string }
   | ControlPlaneRequestBase<"get_run"> & { runId: string }
   | ControlPlaneRequestBase<"list_runs">
   | ControlPlaneRequestBase<"list_events"> & { filter?: AgentEventFilter & { runId?: string } };
@@ -67,6 +69,7 @@ export type ControlPlaneResponse =
   | ControlPlaneSuccess<RunSnapshot>
   | ControlPlaneSuccess<RunSnapshot | null>
   | ControlPlaneSuccess<RunSnapshot[]>
+  | ControlPlaneSuccess<IntegrationReport>
   | ControlPlaneSuccess<{ runId: string; status: "cancel_requested" }>
   | ControlPlaneSuccess<AgentEvent[]>
   | ControlPlaneFailure;
@@ -87,6 +90,8 @@ export interface AgentControlPlaneOptions {
   execution?: ControlPlaneExecutionDefaults;
   /** Optional RunScheduler exposing Run/DAG commands (create_run / start_run / ...). */
   runScheduler?: RunScheduler;
+  /** Optional integrator for integrate_run (merges task diffs into a branch). */
+  integrator?: RunIntegrator;
   /** Optional event store for historical event queries (list_events). */
   eventStore?: AgentEventStore;
 }
@@ -166,6 +171,8 @@ export class AgentControlPlane {
           return this.resumeRun(request);
         case "retry_run":
           return this.retryRun(request);
+        case "integrate_run":
+          return await this.integrateRun(request);
         case "get_run":
           return success(request.requestId, this.getRun(request.runId));
         case "list_runs":
@@ -287,6 +294,24 @@ export class AgentControlPlane {
   ): ControlPlaneSuccess<RunSnapshot> {
     const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
     return success(request.requestId, scheduler.retryRun(request.runId));
+  }
+
+  private async integrateRun(
+    request: Extract<ControlPlaneRequest, { type: "integrate_run" }>,
+  ): Promise<ControlPlaneSuccess<IntegrationReport>> {
+    if (!this.options.integrator) {
+      throw new ControlPlaneProtocolError(
+        "integrator_unavailable",
+        "Run integration is not configured",
+      );
+    }
+    const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
+    const run = scheduler.getRun(request.runId);
+    if (!run) {
+      throw new ControlPlaneProtocolError("run_not_found", `Run ${request.runId} was not found`);
+    }
+    const report = await this.options.integrator.integrate(run);
+    return success(request.requestId, report);
   }
 
   private listRuns(): RunSnapshot[] {
@@ -472,6 +497,7 @@ function parseRequest(input: unknown): ControlPlaneRequest {
     case "pause_run":
     case "resume_run":
     case "retry_run":
+    case "integrate_run":
     case "get_run":
       requireString(value, "runId");
       return value as unknown as ControlPlaneRequest;
