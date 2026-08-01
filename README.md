@@ -110,7 +110,10 @@ npm run dist:desktop         # 打包 NSIS 安装包 → apps/desktop/release/Mu
 ```
 
 - **架构**：主进程内置 `createMultiAgentRuntimeAsync` + 回环 REST server（随机端口）；`preload.cts`（CJS）通过 `contextBridge` 只暴露 API 地址，渲染进程（React）用 fetch 访问 REST API，不接触 Node/Pi 对象（contextIsolation + sandbox）；
-- **界面**：供应商管理页（添加表单：名称 / API 地址 / API Key / 模型名称 / 上下文 + 已配置供应商列表与删除）；
+- **界面**：
+  - 供应商管理页（添加表单：名称 / API 地址 / API Key / 模型名称 / 上下文 + 已配置供应商列表与删除）；
+  - 开发任务页（自然语言需求提交 → 创建并启动 Run，Run 列表实时刷新、可取消）；
+  - Run 详情页（状态、任务 DAG 图、任务状态表、SSE 实时事件日志、取消）；
 - **数据**：存于 `%APPDATA%/multi-agent-dev-runtime/data/`（模型配置 / secrets.json / runs），API Key 不落 Provider 配置；
 - **安全**：CSP 限制 `connect-src http://127.0.0.1:*`，回环绑定，Renderer 无 Node 能力。
 

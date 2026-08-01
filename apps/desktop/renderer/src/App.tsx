@@ -1,16 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { VendorsPage } from "./pages/VendorsPage";
+import { RunsPage } from "./pages/RunsPage";
+import { RunDetailPage } from "./pages/RunDetailPage";
 
-type Page = "vendors";
+type Page =
+  | { name: "vendors" }
+  | { name: "runs" }
+  | { name: "run-detail"; runId: string };
 
 export function App() {
-  const [page] = useState<Page>("vendors");
+  const [page, setPage] = useState<Page>({ name: "runs" });
   const [backendReady, setBackendReady] = useState(false);
 
   useEffect(() => {
     const check = async () => {
       try {
-        const { default: api } = await import("./api");
+        const api = await import("./api");
         const base = await api.apiBase();
         const response = await fetch(`${base}/api/health`);
         setBackendReady(response.ok);
@@ -19,25 +24,47 @@ export function App() {
       }
     };
     void check();
+    const timer = setInterval(() => void check(), 5000);
+    return () => clearInterval(timer);
   }, []);
+
+  const navItem = (label: string, active: boolean, onClick: () => void) => (
+    <div
+      style={{ ...styles.navItem, ...(active ? styles.navItemActive : {}) }}
+      onClick={onClick}
+    >
+      {label}
+    </div>
+  );
 
   return (
     <div style={styles.root}>
       <aside style={styles.sidebar}>
         <div style={styles.logo}>Multi-Agent Dev</div>
         <nav style={styles.nav}>
-          <div
-            style={{ ...styles.navItem, ...(page === "vendors" ? styles.navItemActive : {}) }}
-          >
-            供应商管理
-          </div>
+          {navItem("供应商管理", page.name === "vendors", () => setPage({ name: "vendors" }))}
+          {navItem("开发任务", page.name === "runs" || page.name === "run-detail", () => setPage({ name: "runs" }))}
         </nav>
         <div style={styles.status}>
           {backendReady ? "● 后端已连接" : "○ 连接后端中..."}
         </div>
       </aside>
       <main style={styles.main}>
-        <VendorsPage />
+        {page.name === "vendors" && <VendorsPage />}
+        {page.name === "runs" && (
+          <RunsPage
+            onOpenRun={(runId) => setPage({ name: "run-detail", runId })}
+          />
+        )}
+        {page.name === "run-detail" && (
+          <RunDetailPage
+            runId={page.runId}
+            onBack={() => setPage({ name: "runs" })}
+            onRefreshList={() => {
+              // 返回列表后由 RunsPage 的轮询自动刷新。
+            }}
+          />
+        )}
       </main>
     </div>
   );

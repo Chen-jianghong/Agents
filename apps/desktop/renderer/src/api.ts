@@ -102,3 +102,95 @@ export function removeProvider(id: string): Promise<{ status: number; data: unkn
 export function listModelProfiles(): Promise<{ status: number; data: ModelProfileConfig[] }> {
   return apiFetch<ModelProfileConfig[]>("/api/model/profiles");
 }
+
+// ---- Run 调度 ----
+
+export interface PlanTask {
+  id: string;
+  title: string;
+  role: string;
+  dependsOn: string[];
+  modelProfile?: string;
+  writePaths: string[];
+  acceptanceCriteria: string[];
+  testCommands: string[];
+}
+
+export interface RunTaskSnapshot {
+  taskId: string;
+  title: string;
+  role: string;
+  status: string;
+  dependsOn: string[];
+  writePaths: string[];
+  modelProfile?: string;
+  agentTaskId?: string;
+  profileId?: string;
+  error?: { code: string; message: string };
+  result?: unknown;
+}
+
+export interface RunSnapshot {
+  runId: string;
+  status: string;
+  goal: string;
+  workspace: string;
+  maxParallel: number;
+  dag?: { goal: string; tasks: PlanTask[] };
+  tasks: RunTaskSnapshot[];
+  error?: { code: string; message: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentEvent {
+  eventId: string;
+  agentId: string;
+  agentTaskId?: string;
+  type: string;
+  timestamp: string;
+  payload: unknown;
+}
+
+export function createRun(input: { goal: string; maxParallel?: number }): Promise<{ status: number; data: RunSnapshot | { error: { message: string } } }> {
+  return apiFetch<RunSnapshot>("/api/runs", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function startRun(runId: string): Promise<{ status: number; data: RunSnapshot | { error: { message: string } } }> {
+  return apiFetch<RunSnapshot>(`/api/runs/${encodeURIComponent(runId)}/start`, { method: "POST" });
+}
+
+export function cancelRun(runId: string): Promise<{ status: number; data: unknown }> {
+  return apiFetch(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
+}
+
+export function listRuns(): Promise<{ status: number; data: RunSnapshot[] }> {
+  return apiFetch<RunSnapshot[]>("/api/runs");
+}
+
+export function getRun(runId: string): Promise<{ status: number; data: RunSnapshot | { error: { message: string } } }> {
+  return apiFetch<RunSnapshot>(`/api/runs/${encodeURIComponent(runId)}`);
+}
+
+export function listRunHistory(runId: string): Promise<{ status: number; data: AgentEvent[] }> {
+  return apiFetch<AgentEvent[]>(`/api/runs/${encodeURIComponent(runId)}/events/history`);
+}
+
+/** 订阅 Run 实时事件（SSE）。返回关闭函数。 */
+export function openRunEvents(runId: string, onEvent: (event: AgentEvent) => void): () => void {
+  let source: EventSource | undefined;
+  void apiBase().then((base) => {
+    source = new EventSource(`${base}/api/runs/${encodeURIComponent(runId)}/events`);
+    source.onmessage = (message) => {
+      try {
+        onEvent(JSON.parse(message.data) as AgentEvent);
+      } catch {
+        // 忽略非 JSON 帧
+      }
+    };
+  });
+  return () => source?.close();
+}
