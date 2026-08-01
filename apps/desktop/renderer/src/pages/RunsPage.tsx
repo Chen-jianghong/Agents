@@ -1,15 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cancelRun, createRun, listRuns, startRun, type RunSnapshot } from "../api";
-
-const STATUS_COLORS: Record<string, string> = {
-  created: "#6b7280",
-  planning: "#2563eb",
-  ready: "#2563eb",
-  running: "#2563eb",
-  succeeded: "#0a7d33",
-  failed: "#b91c1c",
-  cancelled: "#6b7280",
-};
+import { statusBadge, statusDot, theme } from "../theme";
 
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 
@@ -125,27 +116,28 @@ export function RunsPage({ onOpenRun }: { onOpenRun: (runId: string) => void }) 
           <table style={styles.table}>
             <thead>
               <tr>
-                <th>Run ID</th>
-                <th>需求</th>
-                <th>状态</th>
-                <th>并行数</th>
-                <th>更新时间</th>
-                <th></th>
+                <th style={styles.th}>Run ID</th>
+                <th style={styles.th}>需求</th>
+                <th style={styles.th}>状态</th>
+                <th style={styles.th}>并行数</th>
+                <th style={styles.th}>更新时间</th>
+                <th style={styles.th}></th>
               </tr>
             </thead>
             <tbody>
               {runs.map((run) => (
                 <tr key={run.runId} style={styles.row} onClick={() => onOpenRun(run.runId)}>
-                  <td style={styles.mono}>{run.runId.slice(0, 12)}…</td>
+                  <td style={{ ...styles.mono, ...styles.td }}>{run.runId.slice(0, 12)}…</td>
                   <td style={styles.goalCell}>{run.goal}</td>
-                  <td>
-                    <span style={{ ...styles.badge, background: STATUS_COLORS[run.status] ?? "#6b7280" }}>
-                      {run.status}
+                  <td style={styles.td}>
+                    <span style={statusBadge(run.paused ? "cancelled" : run.status)}>
+                      <span style={statusDot(run.status)} />
+                      {run.paused ? "paused" : run.status}
                     </span>
                   </td>
-                  <td>{run.maxParallel}</td>
-                  <td style={styles.mono}>{new Date(run.updatedAt).toLocaleTimeString()}</td>
-                  <td>
+                  <td style={styles.td}>{run.maxParallel}</td>
+                  <td style={{ ...styles.mono, ...styles.td }}>{new Date(run.updatedAt).toLocaleTimeString()}</td>
+                  <td style={styles.td}>
                     {!TERMINAL.has(run.status) && run.status !== "created" && (
                       <button style={styles.linkButton} onClick={(event) => void onCancel(event, run.runId)}>
                         取消
@@ -163,56 +155,66 @@ export function RunsPage({ onOpenRun }: { onOpenRun: (runId: string) => void }) 
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  title: { margin: "0 0 16px", fontSize: 20 },
-  card: { background: "#fff", borderRadius: 10, padding: 20, marginBottom: 20, boxShadow: "0 1px 3px rgba(0,0,0,.08)" },
-  cardTitle: { margin: "0 0 16px", fontSize: 15 },
+  title: { margin: "0 0 20px", fontSize: 22, fontWeight: 700 },
+  card: {
+    background: theme.surface,
+    border: `1px solid ${theme.border}`,
+    borderRadius: theme.radius + 4,
+    padding: 22,
+    marginBottom: 20,
+    boxShadow: theme.shadowSm,
+  },
+  cardTitle: { margin: "0 0 16px", fontSize: 15, fontWeight: 600 },
   textarea: {
     width: "100%",
     boxSizing: "border-box",
-    padding: "10px 12px",
-    border: "1px solid #cbd2d9",
-    borderRadius: 6,
+    padding: "12px 14px",
+    background: theme.surfaceAlt,
+    border: `1px solid ${theme.border}`,
+    borderRadius: theme.radiusSm,
     fontSize: 14,
-    fontFamily: "inherit",
+    fontFamily: theme.font,
+    color: theme.text,
     resize: "vertical",
+    outline: "none",
   },
-  submitRow: { display: "flex", alignItems: "center", gap: 16, marginTop: 12 },
-  parallelLabel: { fontSize: 13, color: "#52606d", display: "flex", alignItems: "center", gap: 8 },
+  submitRow: { display: "flex", alignItems: "center", gap: 16, marginTop: 14 },
+  parallelLabel: { fontSize: 13, color: theme.textDim, display: "flex", alignItems: "center", gap: 8 },
   parallelInput: {
     width: 64,
-    padding: "6px 8px",
-    border: "1px solid #cbd2d9",
-    borderRadius: 6,
+    padding: "7px 10px",
+    background: theme.surfaceAlt,
+    border: `1px solid ${theme.border}`,
+    borderRadius: theme.radiusSm,
     fontSize: 14,
+    color: theme.text,
+    outline: "none",
   },
   button: {
     marginLeft: "auto",
-    padding: "10px 18px",
-    background: "#2563eb",
-    color: "#fff",
+    padding: "10px 20px",
+    background: theme.primary,
+    color: theme.primaryText,
     border: 0,
-    borderRadius: 6,
+    borderRadius: theme.radiusSm,
     fontSize: 14,
+    fontWeight: 600,
     cursor: "pointer",
+    transition: "opacity .15s ease",
   },
-  msgOk: { marginTop: 12, fontSize: 13, color: "#0a7d33" },
-  msgErr: { marginTop: 12, fontSize: 13, color: "#b91c1c" },
-  empty: { fontSize: 13, color: "#8a94a6" },
+  msgOk: { marginTop: 12, fontSize: 13, color: theme.success },
+  msgErr: { marginTop: 12, fontSize: 13, color: theme.danger },
+  empty: { fontSize: 13, color: theme.textFaint },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
-  row: { cursor: "pointer" },
-  goalCell: { maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  badge: {
-    display: "inline-block",
-    color: "#fff",
-    padding: "2px 8px",
-    borderRadius: 999,
-    fontSize: 12,
-  },
-  mono: { fontFamily: "Consolas, monospace", fontSize: 12, color: "#52606d" },
+  th: { textAlign: "left", fontSize: 11, color: theme.textFaint, padding: "0 12px 10px 0", fontWeight: 600 },
+  td: { padding: "10px 12px 10px 0", borderTop: `1px solid ${theme.border}` },
+  row: { cursor: "pointer", transition: "background .12s ease" },
+  goalCell: { maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: theme.text },
+  mono: { fontFamily: theme.mono, fontSize: 12, color: theme.textDim },
   linkButton: {
     background: "none",
     border: "none",
-    color: "#b91c1c",
+    color: theme.danger,
     cursor: "pointer",
     fontSize: 13,
     padding: 0,

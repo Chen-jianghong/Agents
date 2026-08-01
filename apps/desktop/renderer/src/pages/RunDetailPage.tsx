@@ -18,6 +18,7 @@ import {
   type RunSnapshot,
   type RunTaskSnapshot,
 } from "../api";
+import { statusBadge, statusDot, theme } from "../theme";
 
 interface TaskResult {
   status: string;
@@ -29,16 +30,6 @@ interface TaskResult {
   usage?: { totalTokens: number; costUsd: number; inputTokens: number; outputTokens: number };
   error?: { code: string; message: string };
 }
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: "#9aa4b2",
-  ready: "#2563eb",
-  running: "#2563eb",
-  testing: "#d97706",
-  succeeded: "#0a7d33",
-  failed: "#b91c1c",
-  cancelled: "#6b7280",
-};
 
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 
@@ -181,7 +172,6 @@ export function RunDetailPage({
   };
 
   const nodes = run?.dag ? layoutDag(run.dag.tasks) : [];
-  const levels = nodes.length > 0 ? Math.max(...nodes.map((node) => node.level)) + 1 : 0;
 
   return (
     <div>
@@ -189,25 +179,25 @@ export function RunDetailPage({
         <button style={styles.backButton} onClick={onBack}>← 返回</button>
         <h2 style={styles.title}>Run 详情</h2>
         {run && !TERMINAL.has(run.status) && run.status !== "created" && !run.paused && (
-          <button style={styles.pauseButton} onClick={() => void onPause()}>暂停</button>
+          <button style={actionButton(theme.warning)} onClick={() => void onPause()}>暂停</button>
         )}
         {run && run.paused && (
-          <button style={styles.resumeButton} onClick={() => void onResume()}>继续</button>
+          <button style={actionButton(theme.success)} onClick={() => void onResume()}>继续</button>
         )}
         {run && (run.status === "failed" || run.status === "cancelled") && (
-          <button style={styles.retryButton} onClick={() => void onRetry()}>重试 Run</button>
+          <button style={actionButton(theme.indigo)} onClick={() => void onRetry()}>重试 Run</button>
         )}
         {run && (run.status === "succeeded" || run.status === "failed") && (
-          <button style={styles.integrateButton} onClick={() => void onIntegrate()}>集成</button>
+          <button style={actionButton(theme.violet)} onClick={() => void onIntegrate()}>集成</button>
         )}
         {run && (run.status === "succeeded" || run.status === "failed") && (
-          <button style={styles.reviewButton} onClick={() => void onReview()}>审查</button>
+          <button style={actionButton("#0891b2")} onClick={() => void onReview()}>审查</button>
         )}
         {run && integration?.status === "merged" && (
-          <button style={styles.mergeButton} onClick={() => void onMerge()}>合并到 main</button>
+          <button style={actionButton(theme.success)} onClick={() => void onMerge()}>合并到 main</button>
         )}
         {run && !TERMINAL.has(run.status) && run.status !== "created" && (
-          <button style={styles.cancelButton} onClick={() => void onCancel()}>取消 Run</button>
+          <button style={actionButton(theme.danger)} onClick={() => void onCancel()}>取消 Run</button>
         )}
       </div>
 
@@ -220,7 +210,8 @@ export function RunDetailPage({
           <section style={styles.card}>
             <div style={styles.runMeta}>
               <span style={styles.mono}>{run.runId}</span>
-              <span style={{ ...styles.badge, background: STATUS_COLORS[run.status] ?? "#6b7280" }}>
+              <span style={statusBadge(run.status)}>
+                <span style={statusDot(run.status)} />
                 {run.paused ? "paused" : run.status}
               </span>
             </div>
@@ -237,7 +228,8 @@ export function RunDetailPage({
             <section style={styles.card}>
               <h3 style={styles.cardTitle}>集成结果</h3>
               <div style={styles.runMeta}>
-                <span style={{ ...styles.badge, background: integration.status === "merged" ? "#0a7d33" : integration.status === "conflict" ? "#b91c1c" : "#6b7280" }}>
+                <span style={statusBadge(integration.status === "merged" ? "succeeded" : integration.status === "conflict" ? "failed" : "cancelled")}>
+                  <span style={statusDot(integration.status === "merged" ? "succeeded" : "failed")} />
                   {integration.status}
                 </span>
                 <span>{integration.message}</span>
@@ -268,7 +260,8 @@ export function RunDetailPage({
             <section style={styles.card}>
               <h3 style={styles.cardTitle}>合并结果</h3>
               <div style={styles.runMeta}>
-                <span style={{ ...styles.badge, background: merge.status === "merged" ? "#0a7d33" : "#b91c1c" }}>
+                <span style={statusBadge(merge.status === "merged" ? "succeeded" : "failed")}>
+                  <span style={statusDot(merge.status === "merged" ? "succeeded" : "failed")} />
                   {merge.status}
                 </span>
                 <span>{merge.message}</span>
@@ -323,7 +316,8 @@ export function RunDetailPage({
                 {nodes.map(({ task, level, index }) => {
                   const x = 30 + level * 180;
                   const y = 24 + index * 56;
-                  const color = STATUS_COLORS[run.tasks.find((t) => t.taskId === task.id)?.status ?? "pending"] ?? "#9aa4b2";
+                  const status = run.tasks.find((t) => t.taskId === task.id)?.status ?? "pending";
+                  const color = theme.status[status] ?? theme.textFaint;
                   return (
                     <g key={task.id}>
                       {task.dependsOn.map((dep) => {
@@ -336,17 +330,17 @@ export function RunDetailPage({
                             y1={24 + depNode.index * 56 + 24}
                             x2={x}
                             y2={y + 24}
-                            stroke="#9aa4b2"
+                            stroke={theme.borderStrong}
                             strokeWidth={1.5}
                             markerEnd="url(#arrowhead)"
                           />
                         );
                       })}
-                      <rect x={x} y={y} width={120} height={48} rx={8} fill={color} opacity={0.12} stroke={color} strokeWidth={1.5} />
-                      <text x={x + 60} y={y + 22} textAnchor="middle" fontSize={12} fontWeight={600} fill="#1f2933">
+                      <rect x={x} y={y} width={120} height={48} rx={8} fill={theme.surfaceAlt} stroke={color} strokeWidth={1.5} />
+                      <text x={x + 60} y={y + 22} textAnchor="middle" fontSize={12} fontWeight={600} fill={theme.text}>
                         {task.role}
                       </text>
-                      <text x={x + 60} y={y + 38} textAnchor="middle" fontSize={10} fill="#52606d">
+                      <text x={x + 60} y={y + 38} textAnchor="middle" fontSize={10} fill={theme.textDim}>
                         {task.id}
                       </text>
                     </g>
@@ -354,7 +348,7 @@ export function RunDetailPage({
                 })}
                 <defs>
                   <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                    <path d="M0,0 L8,4 L0,8 Z" fill="#9aa4b2" />
+                    <path d="M0,0 L8,4 L0,8 Z" fill={theme.borderStrong} />
                   </marker>
                 </defs>
               </svg>
@@ -369,28 +363,29 @@ export function RunDetailPage({
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th>任务</th>
-                    <th>角色</th>
-                    <th>状态</th>
-                    <th>依赖</th>
-                    <th>说明</th>
-                    <th></th>
+                    <th style={styles.th}>任务</th>
+                    <th style={styles.th}>角色</th>
+                    <th style={styles.th}>状态</th>
+                    <th style={styles.th}>依赖</th>
+                    <th style={styles.th}>说明</th>
+                    <th style={styles.th}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {run.tasks.map((task) => (
                     <React.Fragment key={task.taskId}>
                       <tr>
-                        <td style={styles.mono}>{task.taskId}</td>
-                        <td>{task.role}</td>
-                        <td>
-                          <span style={{ ...styles.badge, background: STATUS_COLORS[task.status] ?? "#9aa4b2" }}>
+                        <td style={{ ...styles.mono, ...styles.td }}>{task.taskId}</td>
+                        <td style={styles.td}>{task.role}</td>
+                        <td style={styles.td}>
+                          <span style={statusBadge(task.status)}>
+                            <span style={statusDot(task.status)} />
                             {task.status}
                           </span>
                         </td>
-                        <td style={styles.mono}>{task.dependsOn.length > 0 ? task.dependsOn.join(", ") : "-"}</td>
+                        <td style={{ ...styles.mono, ...styles.td }}>{task.dependsOn.length > 0 ? task.dependsOn.join(", ") : "-"}</td>
                         <td style={styles.errCell}>{task.error?.message ?? task.title}</td>
-                        <td>
+                        <td style={styles.td}>
                           {task.result ? (
                             <button
                               style={styles.detailButton}
@@ -403,7 +398,7 @@ export function RunDetailPage({
                       </tr>
                       {expandedTask === task.taskId && task.result ? (
                         <tr>
-                          <td colSpan={6}>
+                          <td colSpan={6} style={styles.td}>
                             <TaskResultPanel result={task.result as unknown as TaskResult} />
                           </td>
                         </tr>
@@ -441,7 +436,10 @@ function TaskResultPanel({ result }: { result: TaskResult }) {
   return (
     <div style={styles.resultPanel}>
       <div style={styles.resultHeader}>
-        <span>状态：<b style={{ color: result.status === "completed" ? "#0a7d33" : "#b91c1c" }}>{result.status}</b></span>
+        <span style={statusBadge(result.status === "completed" ? "succeeded" : "failed")}>
+          <span style={statusDot(result.status === "completed" ? "succeeded" : "failed")} />
+          {result.status}
+        </span>
         {result.usage && (
           <span style={styles.usage}>
             tokens {result.usage.totalTokens}（in {result.usage.inputTokens} / out {result.usage.outputTokens}）
@@ -457,7 +455,7 @@ function TaskResultPanel({ result }: { result: TaskResult }) {
           <div style={styles.resultLabel}>修改文件（{result.changedFiles!.length}）</div>
           <div style={styles.fileList}>
             {result.changedFiles!.map((file) => (
-              <div key={file} style={styles.fileItem}>📄 {file}</div>
+              <div key={file} style={styles.fileItem}>{file}</div>
             ))}
           </div>
         </div>
@@ -476,9 +474,9 @@ function TaskResultPanel({ result }: { result: TaskResult }) {
           <table style={styles.table}>
             <thead>
               <tr>
-                <th>命令</th>
-                <th>结果</th>
-                <th>输出</th>
+                <th style={styles.th}>命令</th>
+                <th style={styles.th}>结果</th>
+                <th style={styles.th}>输出</th>
               </tr>
             </thead>
             <tbody>
@@ -517,153 +515,144 @@ function TaskResultPanel({ result }: { result: TaskResult }) {
   );
 }
 
+function actionButton(bg: string): React.CSSProperties {
+  return {
+    padding: "8px 16px",
+    background: bg,
+    color: "#0B1220",
+    border: 0,
+    borderRadius: theme.radiusSm,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "opacity .15s ease",
+  };
+}
+
 const styles: Record<string, React.CSSProperties> = {
-  header: { display: "flex", alignItems: "center", gap: 12, marginBottom: 16 },
+  header: { display: "flex", alignItems: "center", gap: 10, marginBottom: 20, flexWrap: "wrap" },
   backButton: {
-    padding: "6px 12px",
-    border: "1px solid #cbd2d9",
-    borderRadius: 6,
-    background: "#fff",
+    padding: "7px 14px",
+    border: `1px solid ${theme.border}`,
+    borderRadius: theme.radiusSm,
+    background: theme.surface,
+    color: theme.textDim,
     cursor: "pointer",
     fontSize: 13,
+    transition: "border-color .15s ease, color .15s ease",
   },
-  title: { margin: 0, fontSize: 20, flex: 1 },
-  cancelButton: {
-    padding: "8px 14px",
-    background: "#b91c1c",
-    color: "#fff",
-    border: 0,
-    borderRadius: 6,
-    fontSize: 13,
-    cursor: "pointer",
+  title: { margin: 0, fontSize: 22, fontWeight: 700, flex: 1 },
+  card: {
+    background: theme.surface,
+    border: `1px solid ${theme.border}`,
+    borderRadius: theme.radius + 4,
+    padding: 22,
+    marginBottom: 20,
+    boxShadow: theme.shadowSm,
   },
-  pauseButton: {
-    padding: "8px 14px",
-    background: "#d97706",
-    color: "#fff",
-    border: 0,
-    borderRadius: 6,
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  resumeButton: {
-    padding: "8px 14px",
-    background: "#0a7d33",
-    color: "#fff",
-    border: 0,
-    borderRadius: 6,
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  retryButton: {
-    padding: "8px 14px",
-    background: "#2563eb",
-    color: "#fff",
-    border: 0,
-    borderRadius: 6,
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  integrateButton: {
-    padding: "8px 14px",
-    background: "#7c3aed",
-    color: "#fff",
-    border: 0,
-    borderRadius: 6,
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  reviewButton: {
-    padding: "8px 14px",
-    background: "#0891b2",
-    color: "#fff",
-    border: 0,
-    borderRadius: 6,
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  mergeButton: {
-    padding: "8px 14px",
-    background: "#0a7d33",
-    color: "#fff",
-    border: 0,
-    borderRadius: 6,
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  card: { background: "#fff", borderRadius: 10, padding: 20, marginBottom: 20, boxShadow: "0 1px 3px rgba(0,0,0,.08)" },
-  cardTitle: { margin: "0 0 16px", fontSize: 15 },
-  runMeta: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 },
-  goal: { fontSize: 15, fontWeight: 600, marginBottom: 8 },
-  metaLine: { fontSize: 12, color: "#52606d" },
-  badge: { display: "inline-block", color: "#fff", padding: "2px 8px", borderRadius: 999, fontSize: 12 },
-  msgErr: { marginTop: 8, fontSize: 13, color: "#b91c1c" },
-  empty: { fontSize: 13, color: "#8a94a6" },
+  cardTitle: { margin: "0 0 16px", fontSize: 15, fontWeight: 600 },
+  runMeta: { display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" },
+  goal: { fontSize: 16, fontWeight: 600, marginBottom: 8 },
+  metaLine: { fontSize: 12, color: theme.textDim, marginBottom: 4 },
+  mono: { fontFamily: theme.mono, fontSize: 12, color: theme.textDim },
+  msgErr: { marginTop: 8, fontSize: 13, color: theme.danger },
+  empty: { fontSize: 13, color: theme.textFaint },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
-  mono: { fontFamily: "Consolas, monospace", fontSize: 12 },
-  errCell: { fontSize: 12, color: "#52606d", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  th: { textAlign: "left", fontSize: 11, color: theme.textFaint, padding: "0 12px 10px 0", fontWeight: 600 },
+  td: { padding: "10px 12px 10px 0", borderTop: `1px solid ${theme.border}` },
+  errCell: {
+    fontSize: 12,
+    color: theme.textDim,
+    maxWidth: 280,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    padding: "10px 12px 10px 0",
+    borderTop: `1px solid ${theme.border}`,
+  },
   detailButton: {
-    padding: "4px 10px",
-    border: "1px solid #cbd2d9",
-    borderRadius: 6,
-    background: "#fff",
+    padding: "4px 12px",
+    border: `1px solid ${theme.border}`,
+    borderRadius: theme.radiusSm,
+    background: theme.surfaceAlt,
+    color: theme.textDim,
     cursor: "pointer",
     fontSize: 12,
+    transition: "color .15s ease, border-color .15s ease",
   },
-  resultPanel: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 14 },
-  resultHeader: { display: "flex", alignItems: "center", gap: 16, marginBottom: 10, fontSize: 13 },
-  usage: { fontSize: 12, color: "#52606d" },
-  resultSection: { marginTop: 10 },
+  resultPanel: {
+    background: theme.surfaceAlt,
+    border: `1px solid ${theme.border}`,
+    borderRadius: theme.radius,
+    padding: 16,
+    marginTop: 4,
+  },
+  resultHeader: { display: "flex", alignItems: "center", gap: 16, marginBottom: 12, flexWrap: "wrap" },
+  usage: { fontSize: 12, color: theme.textDim, fontFamily: theme.mono },
+  resultSection: { marginTop: 12 },
   resultLabel: { fontSize: 13, fontWeight: 600, marginBottom: 6 },
   fileList: { display: "flex", flexWrap: "wrap", gap: 8 },
   fileItem: {
     fontSize: 12,
-    fontFamily: "Consolas, monospace",
-    background: "#eef2f7",
+    fontFamily: theme.mono,
+    background: theme.surface,
+    border: `1px solid ${theme.border}`,
     borderRadius: 4,
     padding: "3px 8px",
+    color: theme.textDim,
   },
-  testPass: { color: "#0a7d33", fontWeight: 600 },
-  testFail: { color: "#b91c1c", fontWeight: 600 },
-  testOutput: { fontSize: 12, color: "#52606d", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  riskItem: { fontSize: 12, color: "#b45309", marginBottom: 4 },
-  findings: { fontSize: 12, color: "#1f2933", marginBottom: 4 },
-  recommendations: { fontSize: 12, color: "#0a7d33", marginBottom: 4 },
-  diffBlock: {
-    background: "#0f172a",
-    color: "#dbeafe",
-    borderRadius: 6,
-    padding: 10,
+  testPass: { color: theme.success, fontWeight: 600 },
+  testFail: { color: theme.danger, fontWeight: 600 },
+  testOutput: {
     fontSize: 12,
-    fontFamily: "Consolas, monospace",
+    color: theme.textDim,
+    maxWidth: 280,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  riskItem: { fontSize: 12, color: theme.warning, marginBottom: 4 },
+  findings: { fontSize: 12, color: theme.text, marginBottom: 4 },
+  recommendations: { fontSize: 12, color: theme.success, marginBottom: 4 },
+  diffBlock: {
+    background: "#0A0F1C",
+    color: "#BBD3F0",
+    borderRadius: theme.radiusSm,
+    padding: 12,
+    fontSize: 12,
+    fontFamily: theme.mono,
     maxHeight: 320,
     overflowY: "auto",
     whiteSpace: "pre",
     overflowX: "auto",
+    border: `1px solid ${theme.border}`,
   },
   outputBlock: {
-    background: "#10151f",
-    color: "#c9d4e4",
-    borderRadius: 6,
-    padding: 10,
+    background: "#0A0F1C",
+    color: "#C6D4E8",
+    borderRadius: theme.radiusSm,
+    padding: 12,
     fontSize: 12,
+    fontFamily: theme.mono,
     maxHeight: 200,
     overflowY: "auto",
     whiteSpace: "pre-wrap",
     wordBreak: "break-all",
+    border: `1px solid ${theme.border}`,
   },
   log: {
-    background: "#10151f",
-    color: "#c9d4e4",
-    borderRadius: 8,
+    background: "#0A0F1C",
+    color: "#C6D4E8",
+    borderRadius: theme.radiusSm,
     padding: 12,
     maxHeight: 260,
     overflowY: "auto",
-    fontFamily: "Consolas, monospace",
+    fontFamily: theme.mono,
     fontSize: 12,
+    border: `1px solid ${theme.border}`,
   },
   logLine: { padding: "2px 0", display: "flex", gap: 10 },
-  logTime: { color: "#6b7a90", flexShrink: 0 },
-  logType: { color: "#7dd3fc", flexShrink: 0 },
-  logTask: { color: "#a5b4c8" },
+  logTime: { color: theme.textFaint, flexShrink: 0 },
+  logType: { color: theme.primary, flexShrink: 0 },
+  logTask: { color: theme.textDim },
 };

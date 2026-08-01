@@ -7,6 +7,7 @@ import {
   type ModelProfileConfig,
   type ProviderConfig,
 } from "../api";
+import { theme } from "../theme";
 
 interface FormState {
   name: string;
@@ -130,12 +131,12 @@ export function VendorsPage() {
           <table style={styles.table}>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>名称</th>
-                <th>API 地址</th>
-                <th>密钥引用</th>
-                <th>模型</th>
-                <th></th>
+                <th style={styles.th}>ID</th>
+                <th style={styles.th}>名称</th>
+                <th style={styles.th}>API 地址</th>
+                <th style={styles.th}>密钥引用</th>
+                <th style={styles.th}>模型</th>
+                <th style={styles.th}></th>
               </tr>
             </thead>
             <tbody>
@@ -143,7 +144,7 @@ export function VendorsPage() {
                 const related = profiles.filter((p) => p.providerId === provider.id);
                 return (
                   <tr key={provider.id}>
-                    <td>{provider.id}</td>
+                    <td style={styles.mono}>{provider.id}</td>
                     <td>{provider.name}</td>
                     <td style={styles.mono}>{provider.baseUrl ?? "-"}</td>
                     <td style={styles.mono}>{provider.apiKeySecretRef ?? "-"}</td>
@@ -169,39 +170,52 @@ export function VendorsPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  title: { margin: "0 0 16px", fontSize: 20 },
-  card: { background: "#fff", borderRadius: 10, padding: 20, marginBottom: 20, boxShadow: "0 1px 3px rgba(0,0,0,.08)" },
-  cardTitle: { margin: "0 0 16px", fontSize: 15 },
+  title: { margin: "0 0 20px", fontSize: 22, fontWeight: 700 },
+  card: {
+    background: theme.surface,
+    border: `1px solid ${theme.border}`,
+    borderRadius: theme.radius + 4,
+    padding: 22,
+    marginBottom: 20,
+    boxShadow: theme.shadowSm,
+  },
+  cardTitle: { margin: "0 0 16px", fontSize: 15, fontWeight: 600 },
   grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" },
   field: { display: "block", marginBottom: 14 },
-  label: { display: "block", fontSize: 13, color: "#52606d", marginBottom: 4 },
+  label: { display: "block", fontSize: 12, color: theme.textDim, marginBottom: 5 },
   input: {
     width: "100%",
     boxSizing: "border-box",
-    padding: "8px 10px",
-    border: "1px solid #cbd2d9",
-    borderRadius: 6,
+    padding: "9px 12px",
+    background: theme.surfaceAlt,
+    border: `1px solid ${theme.border}`,
+    borderRadius: theme.radiusSm,
     fontSize: 14,
+    color: theme.text,
+    outline: "none",
   },
   button: {
     marginTop: 4,
-    padding: "10px 18px",
-    background: "#2563eb",
-    color: "#fff",
+    padding: "10px 20px",
+    background: theme.primary,
+    color: theme.primaryText,
     border: 0,
-    borderRadius: 6,
+    borderRadius: theme.radiusSm,
     fontSize: 14,
+    fontWeight: 600,
     cursor: "pointer",
   },
-  msgOk: { marginTop: 12, fontSize: 13, color: "#0a7d33" },
-  msgErr: { marginTop: 12, fontSize: 13, color: "#b91c1c" },
-  empty: { fontSize: 13, color: "#8a94a6" },
+  msgOk: { marginTop: 12, fontSize: 13, color: theme.success },
+  msgErr: { marginTop: 12, fontSize: 13, color: theme.danger },
+  empty: { fontSize: 13, color: theme.textFaint },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
-  mono: { fontFamily: "Consolas, monospace", fontSize: 12 },
+  th: { textAlign: "left", fontSize: 11, color: theme.textFaint, padding: "0 12px 10px 0", fontWeight: 600 },
+  td: { padding: "10px 12px 10px 0", borderTop: `1px solid ${theme.border}` },
+  mono: { fontFamily: theme.mono, fontSize: 12, color: theme.textDim },
   linkButton: {
     background: "none",
     border: "none",
-    color: "#b91c1c",
+    color: theme.danger,
     cursor: "pointer",
     fontSize: 13,
     padding: 0,

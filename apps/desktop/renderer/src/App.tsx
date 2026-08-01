@@ -4,11 +4,25 @@ import { LoginPage } from "./pages/LoginPage";
 import { VendorsPage } from "./pages/VendorsPage";
 import { RunsPage } from "./pages/RunsPage";
 import { RunDetailPage } from "./pages/RunDetailPage";
+import { theme } from "./theme";
 
 type Page =
   | { name: "vendors" }
   | { name: "runs" }
   | { name: "run-detail"; runId: string };
+
+/** 签名元素：Agent 节点 Logo（主节点 + 两个子节点 + 连线）。 */
+function AgentLogo() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+      <line x1="13" y1="13" x2="4" y2="6" stroke={theme.borderStrong} strokeWidth="1.4" />
+      <line x1="13" y1="13" x2="21" y2="6" stroke={theme.borderStrong} strokeWidth="1.4" />
+      <circle cx="4" cy="6" r="3" fill="none" stroke={theme.primary} strokeWidth="1.4" />
+      <circle cx="21" cy="6" r="3" fill="none" stroke={theme.primary} strokeWidth="1.4" />
+      <circle cx="13" cy="13" r="4.5" fill={theme.primary} />
+    </svg>
+  );
+}
 
 export function App() {
   const [page, setPage] = useState<Page>({ name: "runs" });
@@ -59,37 +73,46 @@ export function App() {
     return <LoginPage onLoggedIn={() => void onLoggedIn()} />;
   }
 
-  const navItem = (label: string, active: boolean, onClick: () => void) => (
-    <div
+  const navItem = (label: string, icon: string, active: boolean, onClick: () => void) => (
+    <button
       style={{ ...styles.navItem, ...(active ? styles.navItemActive : {}) }}
       onClick={onClick}
     >
+      <span style={styles.navIcon}>{icon}</span>
       {label}
-    </div>
+    </button>
   );
 
   return (
     <div style={styles.root}>
       <aside style={styles.sidebar}>
-        <div style={styles.logo}>Multi-Agent Dev</div>
-        <nav style={styles.nav}>
-          {navItem("供应商管理", page.name === "vendors", () => setPage({ name: "vendors" }))}
-          {navItem("开发任务", page.name === "runs" || page.name === "run-detail", () => setPage({ name: "runs" }))}
-        </nav>
-        <div style={styles.userBox}>
-          <div style={styles.userName}>{user.username}（{user.role}）</div>
-          <button style={styles.logoutButton} onClick={() => void onLogout()}>退出登录</button>
+        <div style={styles.logoRow}>
+          <AgentLogo />
+          <span style={styles.logoText}>Multi-Agent Dev</span>
         </div>
-        <div style={styles.status}>
-          {backendReady ? "● 后端已连接" : "○ 连接后端中..."}
+        <nav style={styles.nav}>
+          {navItem("供应商管理", "▤", page.name === "vendors", () => setPage({ name: "vendors" }))}
+          {navItem("开发任务", "▶", page.name === "runs" || page.name === "run-detail", () => setPage({ name: "runs" }))}
+        </nav>
+        <div style={styles.sidebarFooter}>
+          <div style={styles.userBox}>
+            <div style={styles.userAvatar}>{user.username.slice(0, 1).toUpperCase()}</div>
+            <div style={styles.userInfo}>
+              <div style={styles.userName}>{user.username}</div>
+              <div style={styles.userRole}>{user.role}</div>
+            </div>
+          </div>
+          <button style={styles.logoutButton} onClick={() => void onLogout()}>退出</button>
+          <div style={styles.status}>
+            <span style={{ ...styles.statusDot, background: backendReady ? theme.success : theme.textFaint }} />
+            {backendReady ? "后端已连接" : "连接后端中..."}
+          </div>
         </div>
       </aside>
       <main style={styles.main}>
         {page.name === "vendors" && <VendorsPage />}
         {page.name === "runs" && (
-          <RunsPage
-            onOpenRun={(runId) => setPage({ name: "run-detail", runId })}
-          />
+          <RunsPage onOpenRun={(runId) => setPage({ name: "run-detail", runId })} />
         )}
         {page.name === "run-detail" && (
           <RunDetailPage
@@ -111,34 +134,82 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontFamily: "system-ui, sans-serif",
-    color: "#52606d",
+    fontFamily: theme.font,
+    color: theme.textDim,
+    background: theme.bg,
   },
-  root: { display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif", color: "#1f2933" },
+  root: {
+    display: "flex",
+    height: "100vh",
+    fontFamily: theme.font,
+    color: theme.text,
+    background: theme.bg,
+  },
   sidebar: {
-    width: 200,
-    background: "#1c2333",
-    color: "#d9e2ef",
+    width: 216,
+    background: theme.surface,
+    borderRight: `1px solid ${theme.border}`,
+    color: theme.text,
     display: "flex",
     flexDirection: "column",
-    padding: "16px 12px",
+    padding: "18px 14px",
     boxSizing: "border-box",
   },
-  logo: { fontSize: 16, fontWeight: 700, marginBottom: 20 },
-  nav: { flex: 1 },
-  navItem: { padding: "8px 10px", borderRadius: 6, fontSize: 14, cursor: "pointer" },
-  navItemActive: { background: "#2a3550", color: "#fff" },
-  userBox: { borderTop: "1px solid #2a3550", paddingTop: 10, marginTop: 8 },
-  userName: { fontSize: 12, color: "#8fa0bd", marginBottom: 6 },
+  logoRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 26, padding: "0 4px" },
+  logoText: { fontSize: 15, fontWeight: 700, letterSpacing: ".02em" },
+  nav: { flex: 1, display: "flex", flexDirection: "column", gap: 2 },
+  navItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "9px 12px",
+    borderRadius: theme.radiusSm,
+    fontSize: 14,
+    color: theme.textDim,
+    background: "transparent",
+    border: 0,
+    cursor: "pointer",
+    textAlign: "left",
+    transition: "background .15s ease, color .15s ease",
+  },
+  navItemActive: { background: theme.surfaceAlt, color: theme.primary, fontWeight: 600 },
+  navIcon: { fontSize: 13, opacity: 0.9 },
+  sidebarFooter: { borderTop: `1px solid ${theme.border}`, paddingTop: 14, marginTop: 8 },
+  userBox: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 },
+  userAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    background: `linear-gradient(135deg, ${theme.primary}, ${theme.indigo})`,
+    color: "#0B1220",
+    fontWeight: 700,
+    fontSize: 14,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  userInfo: { flex: 1, minWidth: 0 },
+  userName: { fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  userRole: { fontSize: 11, color: theme.textDim, textTransform: "capitalize" },
   logoutButton: {
-    background: "none",
-    border: "1px solid #3a4a6b",
-    color: "#d9e2ef",
-    borderRadius: 6,
-    padding: "4px 10px",
+    width: "100%",
+    padding: "7px 0",
+    background: "transparent",
+    border: `1px solid ${theme.border}`,
+    color: theme.textDim,
+    borderRadius: theme.radiusSm,
     fontSize: 12,
     cursor: "pointer",
+    marginBottom: 12,
+    transition: "border-color .15s ease, color .15s ease",
   },
-  status: { fontSize: 12, color: "#8fa0bd", marginTop: 16 },
-  main: { flex: 1, overflow: "auto", background: "#f5f7fa", padding: 24, boxSizing: "border-box" },
+  status: { display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: theme.textFaint },
+  statusDot: { width: 7, height: 7, borderRadius: 999 },
+  main: {
+    flex: 1,
+    overflow: "auto",
+    padding: 28,
+    boxSizing: "border-box",
+    background: `radial-gradient(1200px 600px at 80% -10%, rgba(34,211,238,.05), transparent), ${theme.bg}`,
+  },
 };

@@ -3,6 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http://127.0.0.1:*; style-src 'self' 'unsafe-inline'">
+  <style>
+    @keyframes mad-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, .5); }
+      70% { box-shadow: 0 0 0 6px rgba(56, 189, 248, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+    }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #24334F; border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #31456B; }
+  </style>
   <title>Multi-Agent Dev</title>
 </head>
 <body>
