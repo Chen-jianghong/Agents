@@ -94,7 +94,7 @@ export class PlannerService implements PlanPlanner {
 
 /** Parse and validate the raw Planner output into a PlanOutcome. */
 export function parsePlanOutput(rawOutput: string): PlanOutcome {
-  const json = extractPlanJson(rawOutput);
+  const json = extractJsonObject(rawOutput);
   if (json === undefined) {
     return {
       status: "planning_failed",
@@ -247,7 +247,8 @@ export function buildPlannerPrompt(goal: string): string {
   ].join("\n");
 }
 
-function extractPlanJson(output: string): string | undefined {
+/** Extract the first JSON object from a model response (tolerating fences). */
+export function extractJsonObject(output: string): string | undefined {
   const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/);
   const candidate = fenced ? fenced[1]! : output;
   const start = candidate.indexOf("{");

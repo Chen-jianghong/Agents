@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import { logout, me, type PublicUser } from "./api";
+import { LoginPage } from "./pages/LoginPage";
 import { VendorsPage } from "./pages/VendorsPage";
 import { RunsPage } from "./pages/RunsPage";
 import { RunDetailPage } from "./pages/RunDetailPage";
@@ -11,6 +13,8 @@ type Page =
 export function App() {
   const [page, setPage] = useState<Page>({ name: "runs" });
   const [backendReady, setBackendReady] = useState(false);
+  const [user, setUser] = useState<PublicUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     const check = async () => {
@@ -27,6 +31,33 @@ export function App() {
     const timer = setInterval(() => void check(), 5000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const current = await me();
+      setUser(current ?? null);
+      setAuthChecked(true);
+    };
+    void checkAuth();
+  }, []);
+
+  const onLoggedIn = async () => {
+    setUser((await me()) ?? null);
+  };
+
+  const onLogout = async () => {
+    await logout();
+    setUser(null);
+    setPage({ name: "runs" });
+  };
+
+  if (!authChecked) {
+    return <div style={styles.loading}>加载中...</div>;
+  }
+
+  if (!user) {
+    return <LoginPage onLoggedIn={() => void onLoggedIn()} />;
+  }
 
   const navItem = (label: string, active: boolean, onClick: () => void) => (
     <div
@@ -45,6 +76,10 @@ export function App() {
           {navItem("供应商管理", page.name === "vendors", () => setPage({ name: "vendors" }))}
           {navItem("开发任务", page.name === "runs" || page.name === "run-detail", () => setPage({ name: "runs" }))}
         </nav>
+        <div style={styles.userBox}>
+          <div style={styles.userName}>{user.username}（{user.role}）</div>
+          <button style={styles.logoutButton} onClick={() => void onLogout()}>退出登录</button>
+        </div>
         <div style={styles.status}>
           {backendReady ? "● 后端已连接" : "○ 连接后端中..."}
         </div>
@@ -71,6 +106,14 @@ export function App() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  loading: {
+    height: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "system-ui, sans-serif",
+    color: "#52606d",
+  },
   root: { display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif", color: "#1f2933" },
   sidebar: {
     width: 200,
@@ -85,6 +128,17 @@ const styles: Record<string, React.CSSProperties> = {
   nav: { flex: 1 },
   navItem: { padding: "8px 10px", borderRadius: 6, fontSize: 14, cursor: "pointer" },
   navItemActive: { background: "#2a3550", color: "#fff" },
+  userBox: { borderTop: "1px solid #2a3550", paddingTop: 10, marginTop: 8 },
+  userName: { fontSize: 12, color: "#8fa0bd", marginBottom: 6 },
+  logoutButton: {
+    background: "none",
+    border: "1px solid #3a4a6b",
+    color: "#d9e2ef",
+    borderRadius: 6,
+    padding: "4px 10px",
+    fontSize: 12,
+    cursor: "pointer",
+  },
   status: { fontSize: 12, color: "#8fa0bd", marginTop: 16 },
   main: { flex: 1, overflow: "auto", background: "#f5f7fa", padding: 24, boxSizing: "border-box" },
 };

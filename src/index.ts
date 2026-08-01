@@ -31,3 +31,5 @@ export * from "./model-config.js";
 export * from "./model-config-service.js";
 export * from "./worker-run-manager.js";
 export * from "./run-integrator.js";
+export * from "./run-reviewer.js";
+export * from "./auth.js";

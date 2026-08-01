@@ -10,6 +10,20 @@ declare global {
   }
 }
 
+const TOKEN_KEY = "multi-agent-dev-token";
+
+export function authToken(): string | undefined {
+  return localStorage.getItem(TOKEN_KEY) ?? undefined;
+}
+
+export function setAuthToken(token: string | undefined): void {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
 let cachedBase: string | undefined;
 
 export async function apiBase(): Promise<string> {
@@ -29,9 +43,14 @@ export async function apiFetch<T>(
   init?: RequestInit,
 ): Promise<{ status: number; data: T }> {
   const base = await apiBase();
+  const token = authToken();
   const response = await fetch(`${base}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
   const text = await response.text();
   let body: unknown = null;
@@ -41,6 +60,45 @@ export async function apiFetch<T>(
     body = text;
   }
   return { status: response.status, data: body as T };
+}
+
+// ---- 认证 ----
+
+export interface PublicUser {
+  id: string;
+  username: string;
+  role: string;
+  createdAt: string;
+}
+
+export async function login(username: string, password: string): Promise<{ status: number; data: { token: string; user: PublicUser } | { error: { message: string } } }> {
+  const result = await apiFetch<{ token: string; user: PublicUser }>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+  if (result.status === 200) {
+    const { token } = result.data as { token: string };
+    setAuthToken(token);
+  }
+  return result;
+}
+
+export async function logout(): Promise<void> {
+  const token = authToken();
+  if (token) {
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // 忽略登出请求失败，本地 token 照常清除。
+    }
+  }
+  setAuthToken(undefined);
+}
+
+export async function me(): Promise<PublicUser | undefined> {
+  if (!authToken()) return undefined;
+  const result = await apiFetch<PublicUser>("/api/auth/me");
+  return result.status === 200 ? (result.data as PublicUser) : undefined;
 }
 
 export interface Vendor {
@@ -192,6 +250,32 @@ export interface IntegrationReport {
 
 export function integrateRun(runId: string): Promise<{ status: number; data: IntegrationReport | { error: { message: string } } }> {
   return apiFetch<IntegrationReport>(`/api/runs/${encodeURIComponent(runId)}/integrate`, { method: "POST" });
+}
+
+export interface MergeReport {
+  runId: string;
+  status: string;
+  branch?: string;
+  message: string;
+}
+
+export function mergeRun(runId: string): Promise<{ status: number; data: MergeReport | { error: { message: string } } }> {
+  return apiFetch<MergeReport>(`/api/runs/${encodeURIComponent(runId)}/merge`, { method: "POST" });
+}
+
+export interface ReviewReport {
+  findings: string[];
+  evidence: string[];
+  recommendations: string[];
+  risks: string[];
+}
+
+export type ReviewOutcome =
+  | { status: "reviewed"; report: ReviewReport }
+  | { status: "review_failed"; reason: { code: string; message: string }; rawOutput?: string };
+
+export function reviewRun(runId: string): Promise<{ status: number; data: ReviewOutcome | { error: { message: string } } }> {
+  return apiFetch<ReviewOutcome>(`/api/runs/${encodeURIComponent(runId)}/review`, { method: "POST" });
 }
 
 export function listRuns(): Promise<{ status: number; data: RunSnapshot[] }> {

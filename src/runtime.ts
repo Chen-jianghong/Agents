@@ -42,6 +42,8 @@ import { RunScheduler } from "./run-scheduler.js";
 import { FileModelConfigStore, type ModelProfileConfig } from "./model-config.js";
 import { ModelConfigService, type SecretStore } from "./model-config-service.js";
 import type { RunIntegrator } from "./run-integrator.js";
+import type { RunReviewer } from "./run-reviewer.js";
+import type { AuthService } from "./auth.js";
 
 export interface MultiAgentRuntimeOptions {
   policy?: FactoryPolicy;
@@ -65,6 +67,10 @@ export interface MultiAgentRuntimeOptions {
   defaultModelProfiles?: ModelProfileConfig[];
   /** Optional integrator for Control Plane / REST integrate_run commands. */
   integrator?: RunIntegrator;
+  /** Optional reviewer for Control Plane / REST review_run commands. */
+  reviewer?: RunReviewer;
+  /** Optional auth service for REST /api/auth/* and authorization. */
+  auth?: AuthService;
   /**
    * Build a shared RunScheduler from controlPlaneExecution and mount it on
    * the Control Plane (requires controlPlaneExecution). When false or
@@ -234,6 +240,7 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
     ...(controlPlaneScheduler ? { runScheduler: controlPlaneScheduler } : {}),
     ...(options.eventStore ? { eventStore: options.eventStore } : {}),
     ...(options.integrator ? { integrator: options.integrator } : {}),
+    ...(options.reviewer ? { reviewer: options.reviewer } : {}),
   });
   const createControlPlaneHttpServer = (serverOptions: ControlPlaneHttpServerOptions = {}) =>
     new ControlPlaneHttpServer(controlPlane, serverOptions);
@@ -255,6 +262,7 @@ export function createMultiAgentRuntime(options: MultiAgentRuntimeOptions = {}):
       ...(apiOptions.modelConfig === undefined && modelConfig
         ? { modelConfig }
         : {}),
+      ...(apiOptions.auth === undefined && options.auth ? { auth: options.auth } : {}),
     });
   const mainAgentFactory = new MainAgentFactory(sessionFactory, factory, registry, manager);
   const persistentProfiles = options.profileStore

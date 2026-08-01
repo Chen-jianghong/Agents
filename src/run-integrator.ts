@@ -38,6 +38,13 @@ export interface IntegrationReport {
   message: string;
 }
 
+export interface MergeReport {
+  runId: string;
+  status: "merged" | "not_found" | "not_a_git_repo" | "failed";
+  branch?: string;
+  message: string;
+}
+
 export interface RunIntegratorOptions {
   /** Git repository the integration branch is created in. */
   workspace: string;
@@ -159,9 +166,63 @@ export class RunIntegrator {
     };
   }
 
+  /**
+   * Merge the Run's integration branch into the default branch (main).
+   * Requires the integration branch to exist (call integrate first).
+   */
+  async merge(runId: string): Promise<MergeReport> {
+    let repoRoot: string;
+    try {
+      repoRoot = await this.git("rev-parse", "--show-toplevel");
+    } catch {
+      return {
+        runId,
+        status: "not_a_git_repo",
+        message: `Workspace ${this.workspace} is not a Git repository`,
+      };
+    }
+    const branch = `${this.branchPrefix}/${runId}`;
+    try {
+      await this.git("rev-parse", "--verify", branch);
+    } catch {
+      return {
+        runId,
+        status: "not_found",
+        branch,
+        message: `Integration branch ${branch} does not exist; integrate the Run first`,
+      };
+    }
+
+    // Determine the default branch (main, master, or the current branch).
+    let defaultBranch = "main";
+    try {
+      const current = await this.git("branch", "--show-current");
+      if (current.trim()) defaultBranch = current.trim();
+    } catch {
+      // fall back to "main"
+    }
+
+    try {
+      await this.git("checkout", defaultBranch);
+      await this.git("merge", "--no-ff", branch, "-m", `merge run ${runId} (Multi-Agent Dev)`);
+      return {
+        runId,
+        status: "merged",
+        branch,
+        message: `Merged ${branch} into ${defaultBranch}`,
+      };
+    } catch (error) {
+      return {
+        runId,
+        status: "failed",
+        branch,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   /** Apply one task's diff; commits it when clean. */
-  private async applyDiff(taskId: string, diff: string): Promise<boolean> {
-    // Pre-check without touching the working tree.
+  private async applyDiff(taskId: string, diff: string): Promise<boolean> {    // Pre-check without touching the working tree.
     try {
       await this.gitApply(diff, true);
     } catch {

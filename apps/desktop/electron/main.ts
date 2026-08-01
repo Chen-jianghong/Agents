@@ -13,6 +13,8 @@ import {
   createMultiAgentRuntimeAsync,
   FileModelConfigStore,
   FileRunStore,
+  FileUserStore,
+  AuthService,
   type MultiAgentRuntime,
 } from "../../../dist/src/index.js";
 
@@ -52,15 +54,26 @@ async function startBackend(): Promise<void> {
   mkdirSync(dataDir, { recursive: true });
   const workspace = process.cwd();
 
+  // 本地认证：users.json 持久化，默认 admin 账号（初始密码 admin）。
+  const userStore = new FileUserStore(join(dataDir, "users"));
+  await userStore.seedAdmin({ username: "admin", password: "admin" });
+  const auth = new AuthService(userStore);
+
   runtime = await createMultiAgentRuntimeAsync({
     modelConfigStore: new FileModelConfigStore(join(dataDir, "models")),
     secrets: fileSecrets(join(dataDir, "secrets.json")),
     runStore: new FileRunStore(join(dataDir, "runs")),
     controlPlaneExecution: { cwd: workspace, agentDir: join(dataDir, "pi") },
     controlPlaneScheduler: { maxParallel: 2 },
+    auth,
   });
 
-  server = runtime.createRestApiServer({ host: "127.0.0.1", port: 0 });
+  server = runtime.createRestApiServer({
+    host: "127.0.0.1",
+    port: 0,
+    auth,
+    authorize: auth.authorize,
+  });
   const address = await server.start();
   restPort = address.port;
   console.log(`[desktop] REST API bound to http://127.0.0.1:${restPort}`);

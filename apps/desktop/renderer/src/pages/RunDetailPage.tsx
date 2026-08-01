@@ -4,13 +4,17 @@ import {
   getRun,
   integrateRun,
   listRunHistory,
+  mergeRun,
   openRunEvents,
   pauseRun,
   resumeRun,
   retryRun,
+  reviewRun,
   type AgentEvent,
   type IntegrationReport,
+  type MergeReport,
   type PlanTask,
+  type ReviewOutcome,
   type RunSnapshot,
   type RunTaskSnapshot,
 } from "../api";
@@ -88,6 +92,8 @@ export function RunDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [integration, setIntegration] = useState<IntegrationReport | null>(null);
+  const [merge, setMerge] = useState<MergeReport | null>(null);
+  const [review, setReview] = useState<ReviewOutcome | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
@@ -156,6 +162,24 @@ export function RunDetailPage({
     }
   };
 
+  const onMerge = async () => {
+    const result = await mergeRun(runId);
+    setMerge(result.data as MergeReport);
+  };
+
+  const onReview = async () => {
+    const result = await reviewRun(runId);
+    if (result.status === 200) {
+      setReview(result.data as ReviewOutcome);
+    } else {
+      const error = (result.data as { error?: { message?: string } }).error;
+      setReview({
+        status: "review_failed",
+        reason: { code: "request_failed", message: error?.message ?? `审查失败：${result.status}` },
+      });
+    }
+  };
+
   const nodes = run?.dag ? layoutDag(run.dag.tasks) : [];
   const levels = nodes.length > 0 ? Math.max(...nodes.map((node) => node.level)) + 1 : 0;
 
@@ -175,6 +199,12 @@ export function RunDetailPage({
         )}
         {run && (run.status === "succeeded" || run.status === "failed") && (
           <button style={styles.integrateButton} onClick={() => void onIntegrate()}>集成</button>
+        )}
+        {run && (run.status === "succeeded" || run.status === "failed") && (
+          <button style={styles.reviewButton} onClick={() => void onReview()}>审查</button>
+        )}
+        {run && integration?.status === "merged" && (
+          <button style={styles.mergeButton} onClick={() => void onMerge()}>合并到 main</button>
         )}
         {run && !TERMINAL.has(run.status) && run.status !== "created" && (
           <button style={styles.cancelButton} onClick={() => void onCancel()}>取消 Run</button>
@@ -230,6 +260,58 @@ export function RunDetailPage({
                     </div>
                   ))}
                 </div>
+              )}
+            </section>
+          )}
+
+          {merge && (
+            <section style={styles.card}>
+              <h3 style={styles.cardTitle}>合并结果</h3>
+              <div style={styles.runMeta}>
+                <span style={{ ...styles.badge, background: merge.status === "merged" ? "#0a7d33" : "#b91c1c" }}>
+                  {merge.status}
+                </span>
+                <span>{merge.message}</span>
+              </div>
+            </section>
+          )}
+
+          {review && (
+            <section style={styles.card}>
+              <h3 style={styles.cardTitle}>代码审查结果</h3>
+              {review.status === "review_failed" ? (
+                <div style={styles.msgErr}>审查失败：{review.reason.message}</div>
+              ) : (
+                <>
+                  <div style={styles.resultSection}>
+                    <div style={styles.resultLabel}>问题（{review.report.findings.length}）</div>
+                    {review.report.findings.map((finding, index) => (
+                      <div key={index} style={styles.findings}>• {finding}</div>
+                    ))}
+                  </div>
+                  <div style={styles.resultSection}>
+                    <div style={styles.resultLabel}>建议</div>
+                    {review.report.recommendations.map((item, index) => (
+                      <div key={index} style={styles.recommendations}>→ {item}</div>
+                    ))}
+                  </div>
+                  {(review.report.risks.length > 0) && (
+                    <div style={styles.resultSection}>
+                      <div style={styles.resultLabel}>风险</div>
+                      {review.report.risks.map((risk, index) => (
+                        <div key={index} style={styles.riskItem}>⚠ {risk}</div>
+                      ))}
+                    </div>
+                  )}
+                  {(review.report.evidence.length > 0) && (
+                    <div style={styles.resultSection}>
+                      <div style={styles.resultLabel}>证据</div>
+                      {review.report.evidence.map((item, index) => (
+                        <div key={index} style={styles.mono}>{item}</div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </section>
           )}
@@ -491,6 +573,24 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     cursor: "pointer",
   },
+  reviewButton: {
+    padding: "8px 14px",
+    background: "#0891b2",
+    color: "#fff",
+    border: 0,
+    borderRadius: 6,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  mergeButton: {
+    padding: "8px 14px",
+    background: "#0a7d33",
+    color: "#fff",
+    border: 0,
+    borderRadius: 6,
+    fontSize: 13,
+    cursor: "pointer",
+  },
   card: { background: "#fff", borderRadius: 10, padding: 20, marginBottom: 20, boxShadow: "0 1px 3px rgba(0,0,0,.08)" },
   cardTitle: { margin: "0 0 16px", fontSize: 15 },
   runMeta: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 },
@@ -527,6 +627,8 @@ const styles: Record<string, React.CSSProperties> = {
   testFail: { color: "#b91c1c", fontWeight: 600 },
   testOutput: { fontSize: 12, color: "#52606d", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   riskItem: { fontSize: 12, color: "#b45309", marginBottom: 4 },
+  findings: { fontSize: 12, color: "#1f2933", marginBottom: 4 },
+  recommendations: { fontSize: 12, color: "#0a7d33", marginBottom: 4 },
   diffBlock: {
     background: "#0f172a",
     color: "#dbeafe",

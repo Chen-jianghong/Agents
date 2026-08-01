@@ -113,9 +113,12 @@ npm run dist:desktop         # 打包 NSIS 安装包 → apps/desktop/release/Mu
 - **界面**：
   - 供应商管理页（添加表单：名称 / API 地址 / API Key / 模型名称 / 上下文 + 已配置供应商列表与删除）；
   - 开发任务页（自然语言需求提交 → 创建并启动 Run，Run 列表实时刷新、可取消）；
-  - Run 详情页（状态、任务 DAG 图、任务状态表、SSE 实时事件日志、**暂停/继续/取消/重试/集成**；任务可展开查看**结果详情**：真实 git Diff / 修改文件列表 / 测试结果 / 风险 / token 与成本 / Agent 输出）；
+  - Run 详情页（状态、任务 DAG 图、任务状态表、SSE 实时事件日志、**暂停/继续/取消/重试/集成/审查/合并**；任务可展开查看**结果详情**：真实 git Diff / 修改文件列表 / 测试结果 / 风险 / token 与成本 / Agent 输出）；
   - 任务完成后宿主自动执行 Planner 输出的 `testCommands`（在任务工作区，结果写入任务测试表，失败不影响任务状态）；
   - **Run 集成**：Run 终态后可点击集成，按依赖顺序把各任务 diff 合并到 `integration/<run-id>` 分支，展示合并结果与冲突；
+  - **代码审查**：Reviewer Agent 审查集成 diff，展示 findings / recommendations / risks / evidence；
+  - **合并到 main**：集成成功后一键把分支合并回主分支；
+  - **登录认证**：启动后先登录（默认 `admin` / `admin`，数据存 `users.json`），退出登录可切换账号；
 - **数据**：存于 `%APPDATA%/multi-agent-dev-runtime/data/`（模型配置 / secrets.json / runs），API Key 不落 Provider 配置；
 - **安全**：CSP 限制 `connect-src http://127.0.0.1:*`，回环绑定，Renderer 无 Node 能力。
 
@@ -477,7 +480,13 @@ const address = await server.start(); // 默认只绑定 127.0.0.1
 | POST | `/api/runs/:runId/resume` | 继续已暂停的 Run |
 | POST | `/api/runs/:runId/retry` | 重试失败的 Run（非 succeeded 任务重置重新调度，成功任务保留） |
 | POST | `/api/runs/:runId/integrate` | **集成 Run**：按依赖顺序把各任务 diff 合并到 `integration/<run-id>` 分支（冲突返回 `conflict`） |
+| POST | `/api/runs/:runId/review` | **审查 Run**：Reviewer Agent 审查集成 diff，返回 findings/evidence/recommendations/risks |
+| POST | `/api/runs/:runId/merge` | **合并到主分支**：把 `integration/<run-id>` 合并回当前默认分支（`--no-ff`） |
 | POST | `/api/runs/:runId/cancel` | 取消 Run |
+| POST | `/api/auth/login` | 登录（匿名可达）：`{ username, password }` → `{ token, user }` |
+| POST | `/api/auth/logout` | 登出（失效当前 token） |
+| GET | `/api/auth/me` | 当前登录用户 |
+| GET | `/api/auth/users` | 用户列表（仅 admin/owner） |
 | GET | `/api/runs/:runId/events` | SSE 事件流（按 Run 过滤，事件用 `data:` JSON 帧推送） |
 | GET | `/api/runs/:runId/events/history` | 已持久化的历史事件（断线重连补事件） |
 | GET | `/api/agents` | 列出 Agent 任务（支持 `?status=&profileId=&runId=&parentTaskId=` 过滤） |
@@ -523,6 +532,8 @@ src/
 ├── task-store.ts            # Agent 任务状态/结果快照和恢复
 ├── run-store.ts             # Run 快照持久化与重启恢复（中断 Run → host_restarted）
 ├── run-integrator.ts        # RunIntegrator：任务 diff 按依赖合并到 integration/<run-id>
+├── run-reviewer.ts          # RunReviewer：Reviewer Agent 审查集成 diff
+├── auth.ts                  # 本地认证：用户/角色/scrypt 哈希/Bearer token
 ├── worker-run-manager.ts    # WorkerRunTaskManager/WorkerRunPool：Run 任务跨进程队列调度
 ├── workspace.ts              # Passthrough/Git Worktree 工作区 Provider
 ├── control-plane.ts         # v1 控制面 DTO、命令分发和事件订阅

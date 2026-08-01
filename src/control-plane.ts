@@ -11,7 +11,8 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentWorkspaceProvider } from "./workspace.js";
 import type { RunSnapshot } from "./plan-contracts.js";
 import type { RunScheduler } from "./run-scheduler.js";
-import type { RunIntegrator, IntegrationReport } from "./run-integrator.js";
+import type { RunIntegrator, IntegrationReport, MergeReport } from "./run-integrator.js";
+import type { RunReviewer, ReviewOutcome } from "./run-reviewer.js";
 
 export const CONTROL_PLANE_VERSION = "v1" as const;
 
@@ -36,6 +37,8 @@ export type ControlPlaneRequest =
   | ControlPlaneRequestBase<"resume_run"> & { runId: string }
   | ControlPlaneRequestBase<"retry_run"> & { runId: string }
   | ControlPlaneRequestBase<"integrate_run"> & { runId: string }
+  | ControlPlaneRequestBase<"merge_run"> & { runId: string }
+  | ControlPlaneRequestBase<"review_run"> & { runId: string }
   | ControlPlaneRequestBase<"get_run"> & { runId: string }
   | ControlPlaneRequestBase<"list_runs">
   | ControlPlaneRequestBase<"list_events"> & { filter?: AgentEventFilter & { runId?: string } };
@@ -70,6 +73,8 @@ export type ControlPlaneResponse =
   | ControlPlaneSuccess<RunSnapshot | null>
   | ControlPlaneSuccess<RunSnapshot[]>
   | ControlPlaneSuccess<IntegrationReport>
+  | ControlPlaneSuccess<MergeReport>
+  | ControlPlaneSuccess<ReviewOutcome>
   | ControlPlaneSuccess<{ runId: string; status: "cancel_requested" }>
   | ControlPlaneSuccess<AgentEvent[]>
   | ControlPlaneFailure;
@@ -92,6 +97,8 @@ export interface AgentControlPlaneOptions {
   runScheduler?: RunScheduler;
   /** Optional integrator for integrate_run (merges task diffs into a branch). */
   integrator?: RunIntegrator;
+  /** Optional reviewer for review_run (reviews the integrated diff). */
+  reviewer?: RunReviewer;
   /** Optional event store for historical event queries (list_events). */
   eventStore?: AgentEventStore;
 }
@@ -173,6 +180,10 @@ export class AgentControlPlane {
           return this.retryRun(request);
         case "integrate_run":
           return await this.integrateRun(request);
+        case "merge_run":
+          return await this.mergeRun(request);
+        case "review_run":
+          return await this.reviewRun(request);
         case "get_run":
           return success(request.requestId, this.getRun(request.runId));
         case "list_runs":
@@ -312,6 +323,42 @@ export class AgentControlPlane {
     }
     const report = await this.options.integrator.integrate(run);
     return success(request.requestId, report);
+  }
+
+  private async mergeRun(
+    request: Extract<ControlPlaneRequest, { type: "merge_run" }>,
+  ): Promise<ControlPlaneSuccess<MergeReport>> {
+    if (!this.options.integrator) {
+      throw new ControlPlaneProtocolError("integrator_unavailable", "Run integration is not configured");
+    }
+    const report = await this.options.integrator.merge(request.runId);
+    return success(request.requestId, report);
+  }
+
+  private async reviewRun(
+    request: Extract<ControlPlaneRequest, { type: "review_run" }>,
+  ): Promise<ControlPlaneSuccess<ReviewOutcome>> {
+    if (!this.options.reviewer) {
+      throw new ControlPlaneProtocolError("reviewer_unavailable", "Run review is not configured");
+    }
+    const scheduler = this.requireRunScheduler("run_scheduler_unavailable");
+    const run = scheduler.getRun(request.runId);
+    if (!run) {
+      throw new ControlPlaneProtocolError("run_not_found", `Run ${request.runId} was not found`);
+    }
+    const diffs = run.tasks
+      .map((task) => (task.result as { diff?: string } | undefined)?.diff)
+      .filter((diff): diff is string => typeof diff === "string" && diff.length > 0);
+    const outcome = await this.options.reviewer.review({
+      goal: run.goal,
+      diff: diffs.join("\n"),
+      taskSummaries: run.tasks.map((task) => ({
+        taskId: task.taskId,
+        role: task.role,
+        status: task.status,
+      })),
+    });
+    return success(request.requestId, outcome);
   }
 
   private listRuns(): RunSnapshot[] {
@@ -498,6 +545,8 @@ function parseRequest(input: unknown): ControlPlaneRequest {
     case "resume_run":
     case "retry_run":
     case "integrate_run":
+    case "merge_run":
+    case "review_run":
     case "get_run":
       requireString(value, "runId");
       return value as unknown as ControlPlaneRequest;

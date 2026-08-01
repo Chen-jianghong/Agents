@@ -23,6 +23,7 @@ import {
 import type { AgentTaskFilter, AgentTaskRecordStatus } from "./task-store.js";
 import type { AgentTask } from "./contracts.js";
 import type { ModelConfigService, ProviderInput, ModelProfileInput } from "./model-config-service.js";
+import { AuthError, AuthService, toPublicUser } from "./auth.js";
 
 export interface MultiAgentRestApiServerOptions {
   host?: string;
@@ -33,6 +34,8 @@ export interface MultiAgentRestApiServerOptions {
   defaultWorkspace?: string;
   /** Model configuration center endpoints (/api/model/*). */
   modelConfig?: ModelConfigService;
+  /** Auth endpoints (/api/auth/*) and admin checks. */
+  auth?: AuthService;
 }
 
 export interface RestApiAddress {
@@ -55,7 +58,7 @@ export class MultiAgentRestApiServer {
   private server: Server | undefined;
   private address: RestApiAddress | undefined;
   private readonly options: Required<Pick<MultiAgentRestApiServerOptions, "host" | "port" | "maxBodyBytes">>
-    & Pick<MultiAgentRestApiServerOptions, "authorize" | "defaultWorkspace" | "modelConfig">;
+    & Pick<MultiAgentRestApiServerOptions, "authorize" | "defaultWorkspace" | "modelConfig" | "auth">;
 
   constructor(
     private readonly controlPlane: AgentControlPlane,
@@ -68,6 +71,7 @@ export class MultiAgentRestApiServer {
       ...(options.authorize ? { authorize: options.authorize } : {}),
       ...(options.defaultWorkspace !== undefined ? { defaultWorkspace: options.defaultWorkspace } : {}),
       ...(options.modelConfig ? { modelConfig: options.modelConfig } : {}),
+      ...(options.auth ? { auth: options.auth } : {}),
     };
   }
 
@@ -110,12 +114,15 @@ export class MultiAgentRestApiServer {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (this.options.authorize && !(await this.options.authorize(request))) {
+    const { pathname } = parseUrl(request.url);
+    // Login must be reachable anonymously; every other route needs a token.
+    const anonymousPath = request.method === "POST" && pathname === "/api/auth/login";
+    if (this.options.authorize && !anonymousPath && !(await this.options.authorize(request))) {
       writeJson(response, 401, { error: { code: "unauthorized", message: "REST API authorization failed" } });
       return;
     }
 
-    const { pathname, query } = parseUrl(request.url);
+    const { query } = parseUrl(request.url);
     const segments = pathname.split("/").filter(Boolean); // e.g. ["api", "runs", "run_1"]
 
     try {
@@ -131,6 +138,9 @@ export class MultiAgentRestApiServer {
         throw new RestApiError(404, "Route not found");
       }
       switch (segments[1]) {
+        case "auth":
+          await this.handleAuth(request, response, segments);
+          return;
         case "profiles":
           if (request.method !== "GET" || segments.length !== 2) throw new RestApiError(404, "Route not found");
           await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "list_profiles" }));
@@ -229,6 +239,14 @@ export class MultiAgentRestApiServer {
       case "integrate":
         requireMethod(request, "POST");
         await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "integrate_run", runId }));
+        return;
+      case "merge":
+        requireMethod(request, "POST");
+        await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "merge_run", runId }));
+        return;
+      case "review":
+        requireMethod(request, "POST");
+        await this.reply(response, await this.controlPlane.handle({ version: "v1", requestId: nextRequestId(), type: "review_run", runId }));
         return;
       case "graph":
       case "tasks":
@@ -579,6 +597,65 @@ form.addEventListener("submit", async (event) => {
 </html>`);
   }
 
+  private async handleAuth(
+    request: IncomingMessage,
+    response: ServerResponse,
+    segments: string[],
+  ): Promise<void> {
+    const auth = this.options.auth;
+    if (!auth) throw new RestApiError(503, "Authentication is not configured");
+    if (segments.length !== 3) throw new RestApiError(404, "Route not found");
+
+    if (request.method === "POST" && segments[2] === "login") {
+      const body = await readJsonBody(request, this.options.maxBodyBytes);
+      const username = body.username;
+      const password = body.password;
+      if (typeof username !== "string" || typeof password !== "string") {
+        throw new RestApiError(422, "username and password are required");
+      }
+      try {
+        const result = await auth.login(username, password);
+        writeJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          writeJson(response, 401, { error: { code: "invalid_credentials", message: error.message } });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    if (request.method === "POST" && segments[2] === "logout") {
+      const token = AuthService.tokenFromRequest(request);
+      if (token) await auth.logout(token);
+      writeJson(response, 200, { status: "logged_out" });
+      return;
+    }
+
+    if (request.method === "GET" && segments[2] === "me") {
+      const token = AuthService.tokenFromRequest(request);
+      const user = token ? await auth.userForToken(token) : undefined;
+      if (!user) {
+        writeJson(response, 401, { error: { code: "unauthorized", message: "Not authenticated" } });
+        return;
+      }
+      writeJson(response, 200, toPublicUser(user));
+      return;
+    }
+
+    if (request.method === "GET" && segments[2] === "users") {
+      if (!(await auth.isAdmin(request))) {
+        writeJson(response, 403, { error: { code: "forbidden", message: "Admin role required" } });
+        return;
+      }
+      writeJson(response, 200, await auth.listPublic());
+      return;
+    }
+
+    throw new RestApiError(404, "Route not found");
+  }
+
   private openRunEventStream(request: IncomingMessage, response: ServerResponse, runId: string): void {
     response.writeHead(200, {
       "Cache-Control": "no-cache",
@@ -727,3 +804,4 @@ function nextRequestId(): string {
   requestCounter += 1;
   return `rest-${requestCounter}`;
 }
+
